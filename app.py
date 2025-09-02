@@ -3,10 +3,15 @@ import pandas as pd
 import json
 from collections import defaultdict
 import os
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
-# Sample data structure - replace with your actual data loading
+# Sample data structure - comprehensive test data
 def load_sample_data():
     """Load comprehensive test data with diverse global representation and realistic representative connections"""
     return [
@@ -446,7 +451,7 @@ def load_sample_data():
         }
     ]
 
-    # Global variable to store data
+# Global variable to store data
 company_data = load_sample_data()
 
 def build_hierarchy_tree(data, root_person=None):
@@ -479,7 +484,7 @@ def build_hierarchy_tree(data, root_person=None):
         }
         
         # Recursively build children
-        for child_name in children_dict.get(person_name, []):
+        for child_name in sorted(children_dict.get(person_name, [])):  # Sort for consistent ordering
             child_node = build_node(child_name)
             if child_node:
                 node['children'].append(child_node)
@@ -513,40 +518,77 @@ def get_all_subordinates(person_name, data):
     find_reports(person_name)
     return subordinates
 
+def normalize_name(name):
+    """Normalize name for comparison"""
+    return name.lower().strip()
+
+# Routes
 @app.route('/')
-def index():
+def landing():
+    """Landing page with navigation options"""
+    return render_template('landing.html')
+
+@app.route('/explore')
+def explore():
+    """Main organizational exploration page"""
     return render_template('index.html')
+
+@app.route('/add-connection')
+def add_connection():
+    """Add connection page"""
+    return render_template('add_connection.html')
 
 @app.route('/api/search')
 def search():
-    query = request.args.get('q', '').lower()
-    department_filter = request.args.get('department', '')
-    country_filter = request.args.get('country', '')
+    """Search for employees with optional filters"""
+    query = request.args.get('q', '').lower().strip()
+    department_filter = request.args.get('department', '').strip()
+    country_filter = request.args.get('country', '').strip()
     
-    # Filter data based on search and filters
-    filtered_data = company_data
+    logger.info(f"Search request: query='{query}', department='{department_filter}', country='{country_filter}'")
     
+    # Start with all data
+    filtered_data = company_data.copy()
+    
+    # Apply search query filter
     if query:
         filtered_data = [
             person for person in filtered_data
-            if query in person['name'].lower() or 
-               query in person['department'].lower() or
-               query in person['position'].lower()
+            if (query in person['name'].lower() or 
+                query in person['department'].lower() or
+                query in person['position'].lower() or
+                query in person.get('location_input', '').lower())
         ]
     
+    # Apply department filter
     if department_filter:
         filtered_data = [person for person in filtered_data if person['department'] == department_filter]
     
+    # Apply country filter
     if country_filter:
         filtered_data = [person for person in filtered_data if person['country'] == country_filter]
+    
+    logger.info(f"Search results: {len(filtered_data)} employees found")
+    
+    # Sort results by name for consistency
+    filtered_data.sort(key=lambda x: x['name'])
     
     return jsonify(filtered_data)
 
 @app.route('/api/hierarchy/<person_name>')
 def get_hierarchy(person_name):
-    # Find the person and their subordinates
-    person = next((p for p in company_data if p['name'].lower() == person_name.lower()), None)
+    """Get organizational hierarchy for a specific person"""
+    logger.info(f"Hierarchy request for: {person_name}")
+    
+    # Find the person (case-insensitive)
+    person = None
+    for p in company_data:
+        if normalize_name(p['name']) == normalize_name(person_name):
+            person = p
+            break
+    
     if not person:
+        logger.warning(f"Person not found: {person_name}")
         return jsonify({'error': 'Person not found'}), 404
     
     # Get all subordinates
@@ -556,13 +598,28 @@ def get_hierarchy(person_name):
     all_people = [person] + subordinates
     hierarchy = build_hierarchy_tree(all_people, person['name'])
     
+    if not hierarchy:
+        logger.warning(f"Could not build hierarchy for: {person_name}")
+        return jsonify({'error': 'Could not build hierarchy'}), 500
+    
+    logger.info(f"Hierarchy built for {person_name}: {len(subordinates)} subordinates found")
+    
     return jsonify(hierarchy)
 
 @app.route('/api/map-data/<person_name>')
 def get_map_data(person_name):
-    # Find the person and their subordinates
-    person = next((p for p in company_data if p['name'].lower() == person_name.lower()), None)
+    """Get geographic distribution data for map visualization"""
+    logger.info(f"Map data request for: {person_name}")
+    
+    # Find the person (case-insensitive)
+    person = None
+    for p in company_data:
+        if normalize_name(p['name']) == normalize_name(person_name):
+            person = p
+            break
+    
     if not person:
+        logger.warning(f"Person not found for map data: {person_name}")
         return jsonify({'error': 'Person not found'}), 404
     
     subordinates = get_all_subordinates(person['name'], company_data)
@@ -572,6 +629,8 @@ def get_map_data(person_name):
     location_data = defaultdict(list)
     for p in all_people:
         location = p.get('location_input', 'Unknown')
+        if not location or location.strip() == '':
+            location = 'Unknown'
         location_data[location].append({
             'name': p['name'],
             'position': p['position'],
@@ -591,17 +650,99 @@ def get_map_data(person_name):
             'country': people[0]['country'] if people else ''
         })
     
+    # Sort by count for consistency
+    map_data.sort(key=lambda x: x['count'], reverse=True)
+    
+    logger.info(f"Map data generated for {person_name}: {len(map_data)} locations")
+    
     return jsonify(map_data)
 
 @app.route('/api/filters')
 def get_filters():
-    departments = list(set(person['department'] for person in company_data))
-    countries = list(set(person['country'] for person in company_data))
+    """Get available filter options for departments and countries"""
+    departments = list(set(person['department'] for person in company_data if person.get('department')))
+    countries = list(set(person['country'] for person in company_data if person.get('country')))
     
     return jsonify({
         'departments': sorted(departments),
         'countries': sorted(countries)
     })
 
+@app.route('/api/add-connection', methods=['POST'])
+def add_connection_api():
+    """Add a new connection (placeholder for future implementation)"""
+    try:
+        connection_data = request.get_json()
+        logger.info(f"New connection data received: {connection_data}")
+        
+        # Here you would typically save to database
+        # For now, just return success
+        
+        return jsonify({
+            'success': True,
+            'message': 'Connection added successfully',
+            'data': connection_data
+        })
+    
+    except Exception as e:
+        logger.error(f"Error adding connection: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': 'Failed to add connection',
+            'error': str(e)
+        }), 500
+
+@app.route('/api/stats')
+def get_stats():
+    """Get overall statistics about the organization"""
+    total_employees = len(company_data)
+    departments = len(set(person['department'] for person in company_data))
+    countries = len(set(person['country'] for person in company_data))
+    locations = len(set(person.get('location_input', 'Unknown') for person in company_data))
+    
+    # Connection statistics
+    direct_connections = len([p for p in company_data if p.get('relationship_with_qt', '').lower() == 'direct'])
+    indirect_connections = len([p for p in company_data if p.get('relationship_with_qt', '').lower() == 'indirect'])
+    no_connections = total_employees - direct_connections - indirect_connections
+    
+    return jsonify({
+        'total_employees': total_employees,
+        'departments': departments,
+        'countries': countries,
+        'locations': locations,
+        'connections': {
+            'direct': direct_connections,
+            'indirect': indirect_connections,
+            'none': no_connections
+        }
+    })
+
+# Error handlers
+@app.errorhandler(404)
+def not_found_error(error):
+    return jsonify({'error': 'Not found'}), 404
+
+@app.errorhandler(500)
+def internal_error(error):
+    return jsonify({'error': 'Internal server error'}), 500
+
+# Health check endpoint
+@app.route('/health')
+def health_check():
+    return jsonify({
+        'status': 'healthy',
+        'employees_loaded': len(company_data),
+        'version': '1.0.0'
+    })
+
 if __name__ == '__main__':
-    app.run(debug=True, port=8080)
+    logger.info("Starting Smart Stakeholder Search Flask application...")
+    logger.info(f"Loaded {len(company_data)} employees")
+    
+    # Print some startup info
+    departments = set(person['department'] for person in company_data)
+    countries = set(person['country'] for person in company_data)
+    logger.info(f"Departments: {', '.join(sorted(departments))}")
+    logger.info(f"Countries: {', '.join(sorted(countries))}")
+    
+    app.run(debug=True, port=5000)

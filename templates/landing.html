@@ -1,0 +1,539 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Stakeholder Search - Welcome</title>
+    
+    <!-- External Libraries -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    
+    <style>
+        /* CSS Variables for consistent theming */
+        :root {
+            --primary-blue: #0E3386;
+            --deep-blue: #0A2A6B;
+            --light-blue: #1E4A9C;
+            --ultra-light-blue: #E8EFFF;
+            --dark-blue: #082050;
+            --accent-blue: #2B5AA0;
+            --gradient-start: #0E3386;
+            --gradient-end: #1E4A9C;
+            
+            --pure-white: #FFFFFF;
+            --off-white: #FEFEFE;
+            --light-gray: #F8F9FE;
+            --medium-gray: #E5E7EB;
+            --dark-gray: #374151;
+            --charcoal: #1F2937;
+            --text-primary: #111827;
+            --text-secondary: #6B7280;
+            --text-muted: #9CA3AF;
+            
+            --glass-bg: rgba(255, 255, 255, 0.95);
+            --glass-border: rgba(14, 51, 134, 0.15);
+            
+            --primary-gradient: linear-gradient(135deg, var(--gradient-start) 0%, var(--gradient-end) 100%);
+            --accent-gradient: linear-gradient(135deg, var(--primary-blue) 0%, var(--deep-blue) 100%);
+            
+            --shadow-subtle: 0 1px 3px rgba(14, 51, 134, 0.12), 0 1px 2px rgba(14, 51, 134, 0.06);
+            --shadow-medium: 0 4px 6px rgba(14, 51, 134, 0.15), 0 2px 4px rgba(14, 51, 134, 0.08);
+            --shadow-large: 0 20px 25px rgba(14, 51, 134, 0.15), 0 10px 10px rgba(14, 51, 134, 0.08);
+            --shadow-glow: 0 0 20px rgba(14, 51, 134, 0.3);
+        }
+
+        /* Reset and Base Styles */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            min-height: 100vh;
+            color: var(--text-primary);
+            line-height: 1.6;
+            font-weight: 400;
+            letter-spacing: -0.025em;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+        }
+
+        /* Main Container */
+        .landing-container {
+            max-width: 900px;
+            width: 100%;
+            background: var(--glass-bg);
+            border-radius: 32px;
+            border: 1px solid var(--glass-border);
+            backdrop-filter: blur(20px);
+            box-shadow: var(--shadow-large);
+            overflow: hidden;
+            position: relative;
+        }
+
+        .landing-container::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 1px;
+            background: var(--primary-gradient);
+            z-index: 1;
+        }
+
+        /* Hero Section */
+        .hero-section {
+            background: var(--primary-gradient);
+            color: var(--pure-white);
+            padding: 80px 60px;
+            text-align: center;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .hero-section::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: radial-gradient(circle, rgba(255, 255, 255, 0.1) 0%, transparent 70%);
+            animation: float 8s ease-in-out infinite;
+        }
+
+        @keyframes float {
+            0%, 100% { transform: translate(-50%, -50%) rotate(0deg); }
+            50% { transform: translate(-50%, -50%) rotate(180deg); }
+        }
+
+        .hero-content {
+            position: relative;
+            z-index: 2;
+        }
+
+        .hero-title {
+            font-size: 3.5rem;
+            font-weight: 800;
+            margin-bottom: 20px;
+            font-family: 'Inter', sans-serif;
+            text-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            letter-spacing: -0.04em;
+            background: linear-gradient(135deg, #ffffff 0%, rgba(255, 255, 255, 0.85) 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .hero-subtitle {
+            font-size: 1.4rem;
+            font-weight: 400;
+            opacity: 0.95;
+            max-width: 600px;
+            margin: 0 auto 30px;
+            letter-spacing: -0.01em;
+        }
+
+        .hero-description {
+            font-size: 1.1rem;
+            font-weight: 300;
+            opacity: 0.85;
+            max-width: 500px;
+            margin: 0 auto;
+        }
+
+        /* Features Section */
+        .features-section {
+            padding: 60px;
+            background: var(--pure-white);
+        }
+
+        .section-title {
+            text-align: center;
+            font-size: 2.2rem;
+            font-weight: 700;
+            color: var(--primary-blue);
+            margin-bottom: 50px;
+            letter-spacing: -0.02em;
+        }
+
+        .features-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 40px;
+            margin-bottom: 60px;
+        }
+
+        .feature-card {
+            background: linear-gradient(135deg, var(--ultra-light-blue) 0%, rgba(255, 255, 255, 0.8) 100%);
+            border: 2px solid var(--glass-border);
+            border-radius: 24px;
+            padding: 40px;
+            text-align: center;
+            transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+            cursor: pointer;
+            position: relative;
+            overflow: hidden;
+            box-shadow: var(--shadow-subtle);
+            min-height: 320px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+
+        .feature-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 6px;
+            background: var(--accent-gradient);
+            transform: scaleX(0);
+            transition: transform 0.4s ease;
+        }
+
+        .feature-card:hover::before {
+            transform: scaleX(1);
+        }
+
+        .feature-card:hover {
+            transform: translateY(-12px) scale(1.02);
+            border-color: var(--primary-blue);
+            box-shadow: var(--shadow-glow);
+        }
+
+        .feature-icon {
+            width: 80px;
+            height: 80px;
+            background: var(--accent-gradient);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 24px;
+            font-size: 36px;
+            box-shadow: var(--shadow-medium);
+            transition: transform 0.3s ease;
+        }
+
+        .feature-card:hover .feature-icon {
+            transform: scale(1.1) rotate(5deg);
+        }
+
+        .feature-title {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: var(--text-primary);
+            margin-bottom: 16px;
+            letter-spacing: -0.01em;
+        }
+
+        .feature-description {
+            font-size: 1rem;
+            color: var(--text-secondary);
+            line-height: 1.7;
+            margin-bottom: 24px;
+        }
+
+        .feature-button {
+            background: var(--accent-gradient);
+            color: var(--pure-white);
+            border: none;
+            padding: 16px 32px;
+            border-radius: 16px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            font-family: 'Inter', sans-serif;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            box-shadow: var(--shadow-medium);
+            position: relative;
+            overflow: hidden;
+            text-decoration: none;
+            display: inline-block;
+        }
+
+        .feature-button::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+            transition: left 0.5s;
+        }
+
+        .feature-button:hover::before {
+            left: 100%;
+        }
+
+        .feature-button:hover {
+            transform: translateY(-2px) scale(1.05);
+            box-shadow: var(--shadow-glow);
+        }
+
+        .feature-button:active {
+            transform: translateY(0) scale(0.98);
+        }
+
+        /* Stats Section */
+        .stats-section {
+            background: var(--light-gray);
+            padding: 50px 60px;
+            border-top: 1px solid var(--medium-gray);
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 30px;
+            text-align: center;
+        }
+
+        .stat-item {
+            padding: 20px;
+            background: var(--pure-white);
+            border-radius: 16px;
+            box-shadow: var(--shadow-subtle);
+            transition: transform 0.3s ease;
+        }
+
+        .stat-item:hover {
+            transform: translateY(-4px);
+        }
+
+        .stat-number {
+            font-size: 2.5rem;
+            font-weight: 800;
+            color: var(--primary-blue);
+            margin-bottom: 8px;
+        }
+
+        .stat-label {
+            font-size: 0.9rem;
+            font-weight: 500;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        /* Responsive Design */
+        @media (max-width: 768px) {
+            .landing-container {
+                margin: 16px;
+                border-radius: 24px;
+            }
+
+            .hero-section {
+                padding: 60px 40px;
+            }
+
+            .hero-title {
+                font-size: 2.5rem;
+            }
+
+            .hero-subtitle {
+                font-size: 1.2rem;
+            }
+
+            .features-section {
+                padding: 40px 30px;
+            }
+
+            .features-grid {
+                grid-template-columns: 1fr;
+                gap: 30px;
+            }
+
+            .feature-card {
+                padding: 30px;
+                min-height: 280px;
+            }
+
+            .stats-section {
+                padding: 40px 30px;
+            }
+
+            .stats-grid {
+                grid-template-columns: repeat(2, 1fr);
+                gap: 20px;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .hero-section {
+                padding: 50px 24px;
+            }
+
+            .hero-title {
+                font-size: 2rem;
+            }
+
+            .features-section {
+                padding: 30px 20px;
+            }
+
+            .feature-card {
+                padding: 24px;
+                min-height: 260px;
+            }
+
+            .stats-section {
+                padding: 30px 20px;
+            }
+
+            .stats-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* Loading animation for stats */
+        .stat-number {
+            animation: countUp 2s ease-out;
+        }
+
+        @keyframes countUp {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="landing-container">
+        <!-- Hero Section -->
+        <section class="hero-section">
+            <div class="hero-content">
+                <h1 class="hero-title">Smart Stakeholder Search</h1>
+                <p class="hero-subtitle">Navigate your organization with intelligence</p>
+                <p class="hero-description">
+                    Discover connections, visualize hierarchies, and unlock business opportunities within your organizational network
+                </p>
+            </div>
+        </section>
+
+        <!-- Features Section -->
+        <section class="features-section">
+            <h2 class="section-title">Choose Your Journey</h2>
+            <div class="features-grid">
+                <div class="feature-card" onclick="window.location.href='/explore'">
+                    <div class="feature-icon">🔍</div>
+                    <h3 class="feature-title">Explore Organization</h3>
+                    <p class="feature-description">
+                        Dive deep into your organizational structure. Search employees, visualize reporting relationships, discover connection champions, and identify business opportunities through interactive charts and maps.
+                    </p>
+                    <a href="/explore" class="feature-button">Start Exploring</a>
+                </div>
+
+                <div class="feature-card" onclick="window.location.href='/add-connection'">
+                    <div class="feature-icon">➕</div>
+                    <h3 class="feature-title">Add New Connection</h3>
+                    <p class="feature-description">
+                        Expand your network by adding new stakeholder connections. Build relationships, document interaction levels, and grow your organizational influence systematically.
+                    </p>
+                    <a href="/add-connection" class="feature-button">Add Connection</a>
+                </div>
+            </div>
+        </section>
+
+        <!-- Stats Section -->
+        <section class="stats-section">
+            <div class="stats-grid">
+                <div class="stat-item">
+                    <div class="stat-number" id="total-employees">—</div>
+                    <div class="stat-label">Total Employees</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-number" id="departments">—</div>
+                    <div class="stat-label">Departments</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-number" id="countries">—</div>
+                    <div class="stat-label">Countries</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-number" id="direct-connections">—</div>
+                    <div class="stat-label">Direct Connections</div>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <script>
+        // Load statistics on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            loadStats();
+        });
+
+        async function loadStats() {
+            try {
+                const response = await fetch('/api/stats');
+                if (!response.ok) {
+                    throw new Error('Failed to load stats');
+                }
+                
+                const stats = await response.json();
+                
+                // Animate the numbers
+                animateNumber('total-employees', stats.total_employees);
+                animateNumber('departments', stats.departments);
+                animateNumber('countries', stats.countries);
+                animateNumber('direct-connections', stats.connections.direct);
+                
+            } catch (error) {
+                console.error('Error loading stats:', error);
+                // Show placeholder values if API fails
+                document.getElementById('total-employees').textContent = '25+';
+                document.getElementById('departments').textContent = '8';
+                document.getElementById('countries').textContent = '4';
+                document.getElementById('direct-connections').textContent = '12';
+            }
+        }
+
+        function animateNumber(elementId, targetNumber) {
+            const element = document.getElementById(elementId);
+            const duration = 2000; // 2 seconds
+            const increment = targetNumber / (duration / 50); // Update every 50ms
+            let current = 0;
+            
+            const timer = setInterval(() => {
+                current += increment;
+                if (current >= targetNumber) {
+                    element.textContent = targetNumber;
+                    clearInterval(timer);
+                } else {
+                    element.textContent = Math.floor(current);
+                }
+            }, 50);
+        }
+
+        // Add click handlers for feature cards
+        document.addEventListener('click', function(e) {
+            const card = e.target.closest('.feature-card');
+            if (card && e.target.tagName !== 'A') {
+                const link = card.querySelector('.feature-button');
+                if (link) {
+                    window.location.href = link.href;
+                }
+            }
+        });
+
+        console.log('Smart Stakeholder Search landing page loaded successfully');
+    </script>
+</body>
+</html>

@@ -3,13 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Smart Stakeholder Search</title>
+    <title>Explore Organization - Smart Stakeholder Search</title>
     
     <!-- External Libraries -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
-    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Space+Grotesk:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     
     <!-- Custom CSS -->
     <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
@@ -17,29 +17,20 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1>Smart Stakeholder Search</h1>
-            <p>Search and explore your organizational structure</p>
+            <h1>Explore Organization</h1>
+            <p>Search and analyze your organizational structure</p>
+            <div style="text-align: center; margin-top: 20px;">
+                <a href="/" style="color: rgba(255,255,255,0.8); text-decoration: none; font-size: 0.9rem;">
+                    ← Back to Main Menu
+                </a>
+            </div>
         </div>
 
         <div class="search-section">
             <div class="search-container">
                 <div class="search-group">
                     <label for="search">Search Employee</label>
-                    <input type="text" id="search" placeholder="Enter name or department...">
-                </div>
-                
-                <div class="filter-group">
-                    <label for="department-filter">Department</label>
-                    <select id="department-filter">
-                        <option value="">All Departments</option>
-                    </select>
-                </div>
-                
-                <div class="filter-group">
-                    <label for="country-filter">Country</label>
-                    <select id="country-filter">
-                        <option value="">All Countries</option>
-                    </select>
+                    <input type="text" id="search" placeholder="Enter employee name...">
                 </div>
                 
                 <button class="search-btn" onclick="searchEmployees()">Search</button>
