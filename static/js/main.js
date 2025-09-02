@@ -313,34 +313,34 @@ function analyzeBusinessOpportunities(data) {
 }
 
 // Display business opportunity information banner
-function displayBusinessOpportunityInfo(stats) {
-    const infoContainer = document.getElementById('business-opportunity-info');
-    if (!infoContainer) return;
+// function displayBusinessOpportunityInfo(stats) {
+//     const infoContainer = document.getElementById('business-opportunity-info');
+//     if (!infoContainer) return;
     
-    let content = '';
+//     let content = '';
     
-    if (stats.direct > 0) {
-        const plural = stats.direct > 1 ? 's' : '';
-        content += '<div class="business-opportunity-banner">' +
-            '<span class="opportunity-icon">🎯</span>' +
-            '<strong>SALES OPPORTUNITY ALERT!</strong> ' +
-            'You have ' + stats.direct + ' direct connection' + plural + ' in this team - ' +
-            'Perfect for sales introductions!' +
-            '</div>';
-    }
+//     if (stats.direct > 0) {
+//         const plural = stats.direct > 1 ? 's' : '';
+//         content += '<div class="business-opportunity-banner">' +
+//             '<span class="opportunity-icon">🎯</span>' +
+//             '<strong>SALES OPPORTUNITY ALERT!</strong> ' +
+//             'You have ' + stats.direct + ' direct connection' + plural + ' in this team - ' +
+//             'Perfect for sales introductions!' +
+//             '</div>';
+//     }
     
-    if (stats.indirect > 0 && stats.direct === 0) {
-        const plural = stats.indirect > 1 ? 's' : '';
-        content += '<div class="business-opportunity-banner">' +
-            '<span class="opportunity-icon">💼</span>' +
-            '<strong>BUSINESS DEVELOPMENT OPPORTUNITY!</strong> ' +
-            stats.indirect + ' indirect connection' + plural + ' found - ' +
-            'Consider warm introductions for sales outreach.' +
-            '</div>';
-    }
+//     if (stats.indirect > 0 && stats.direct === 0) {
+//         const plural = stats.indirect > 1 ? 's' : '';
+//         content += '<div class="business-opportunity-banner">' +
+//             '<span class="opportunity-icon">💼</span>' +
+//             '<strong>BUSINESS DEVELOPMENT OPPORTUNITY!</strong> ' +
+//             stats.indirect + ' indirect connection' + plural + ' found - ' +
+//             'Consider warm introductions for sales outreach.' +
+//             '</div>';
+//     }
     
-    infoContainer.innerHTML = content;
-}
+//     infoContainer.innerHTML = content;
+// }
 
 // Analyze representative connections for champion identification
 function analyzeRepresentatives(data) {
