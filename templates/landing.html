@@ -57,16 +57,13 @@
             line-height: 1.6;
             font-weight: 400;
             letter-spacing: -0.025em;
-            display: flex;
-            align-items: center;
-            justify-content: center;
             padding: 24px;
         }
 
         /* Main Container */
         .landing-container {
-            max-width: 900px;
-            width: 100%;
+            max-width: 1600px;
+            margin: 0 auto;
             background: var(--glass-bg);
             border-radius: 32px;
             border: 1px solid var(--glass-border);
@@ -219,6 +216,7 @@
             justify-content: center;
             margin: 0 auto 24px;
             font-size: 36px;
+            color: white;
             box-shadow: var(--shadow-medium);
             transition: transform 0.3s ease;
         }
@@ -294,18 +292,20 @@
         }
 
         .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 30px;
+            display: flex;
+            justify-content: center;
+            gap: 40px;
+            flex-wrap: wrap;
             text-align: center;
         }
 
         .stat-item {
-            padding: 20px;
+            padding: 20px 30px;
             background: var(--pure-white);
             border-radius: 16px;
             box-shadow: var(--shadow-subtle);
             transition: transform 0.3s ease;
+            min-width: 150px;
         }
 
         .stat-item:hover {
