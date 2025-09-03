@@ -4,6 +4,7 @@ import json
 from collections import defaultdict
 import os
 import logging
+from datetime import datetime
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -451,8 +452,12 @@ def load_sample_data():
         }
     ]
 
-# Global variable to store data
+# Global variables to store data
 company_data = load_sample_data()
+new_connections = []  # Store new connections
+
+# Google Apps Script URL (you need to set this up)
+GOOGLE_SCRIPT_URL = None  # Replace with your actual Apps Script URL when ready
 
 def build_hierarchy_tree(data, root_person=None):
     """Build a hierarchical tree structure from flat data"""
@@ -521,6 +526,36 @@ def get_all_subordinates(person_name, data):
 def normalize_name(name):
     """Normalize name for comparison"""
     return name.lower().strip()
+
+def add_connection_to_google_sheets(connection_data):
+    """Send connection data to Google Apps Script (if configured)"""
+    if not GOOGLE_SCRIPT_URL:
+        logger.info("Google Sheets integration not configured (GOOGLE_SCRIPT_URL not set)")
+        return False
+    
+    try:
+        response = requests.post(
+            GOOGLE_SCRIPT_URL,
+            json=connection_data,
+            headers={'Content-Type': 'application/json'},
+            timeout=10
+        )
+        
+        if response.status_code == 200:
+            result = response.json()
+            if result.get('success'):
+                logger.info("Successfully added connection to Google Sheets")
+                return True
+            else:
+                logger.error(f"Google Sheets error: {result.get('error')}")
+                return False
+        else:
+            logger.error(f"HTTP error: {response.status_code}")
+            return False
+            
+    except Exception as e:
+        logger.error(f"Error sending to Google Sheets: {str(e)}")
+        return False
 
 # Routes
 @app.route('/')
@@ -670,27 +705,76 @@ def get_filters():
 
 @app.route('/api/add-connection', methods=['POST'])
 def add_connection_api():
-    """Add a new connection (placeholder for future implementation)"""
+    """Add a new connection and store it both locally and optionally in Google Sheets"""
     try:
+        # Get the JSON data from request
         connection_data = request.get_json()
+        
+        if not connection_data:
+            logger.error("No data received in request")
+            return jsonify({
+                'success': False,
+                'message': 'No data received'
+            }), 400
+        
         logger.info(f"New connection data received: {connection_data}")
         
-        # Here you would typically save to database
-        # For now, just return success
+        # Add ID and timestamp
+        connection_data['id'] = len(new_connections) + 1
+        connection_data['created_at'] = datetime.now().isoformat()
+        
+        # Store locally
+        new_connections.append(connection_data)
+        
+        # Try to add to Google Sheets (if configured)
+        sheets_success = add_connection_to_google_sheets(connection_data)
+        
+        logger.info(f"Connection stored locally. Google Sheets: {'Success' if sheets_success else 'Skipped/Failed'}")
+        
+        # Print detailed information to console
+        print("=" * 60)
+        print("NEW CONNECTION ADDED:")
+        print("=" * 60)
+        print(f"ID: {connection_data.get('id')}")
+        print(f"Name: {connection_data.get('name', 'N/A')}")
+        print(f"Email: {connection_data.get('email', 'N/A')}")
+        print(f"Designation: {connection_data.get('designation', 'N/A')}")
+        print(f"Department: {connection_data.get('department', 'N/A')}")
+        print(f"Connection Champion: {connection_data.get('connectionChampion', 'N/A')}")
+        print(f"Degree: {connection_data.get('degreeOfConnection', 'N/A')}")
+        print(f"MOMA URL: {connection_data.get('momaUrl', 'N/A')}")
+        print(f"Date Added: {connection_data.get('dateAdded', 'N/A')}")
+        print(f"Created At: {connection_data.get('created_at', 'N/A')}")
+        print(f"Google Sheets: {'✓ Success' if sheets_success else '✗ Not configured/Failed'}")
+        print("=" * 60)
+        print(f"TOTAL CONNECTIONS IN DATABASE: {len(new_connections)}")
+        print("=" * 60)
         
         return jsonify({
             'success': True,
             'message': 'Connection added successfully',
-            'data': connection_data
+            'data': connection_data,
+            'sheets_updated': sheets_success,
+            'total_connections': len(new_connections)
         })
     
     except Exception as e:
         logger.error(f"Error adding connection: {str(e)}")
+        print(f"ERROR ADDING CONNECTION: {str(e)}")
         return jsonify({
             'success': False,
             'message': 'Failed to add connection',
             'error': str(e)
         }), 500
+
+@app.route('/api/connections')
+def get_connections():
+    """Get all stored connections"""
+    return jsonify({
+        'success': True,
+        'connections': new_connections,
+        'total': len(new_connections)
+    })
 
 @app.route('/api/stats')
 def get_stats():
@@ -732,6 +816,8 @@ def health_check():
     return jsonify({
         'status': 'healthy',
         'employees_loaded': len(company_data),
+        'new_connections': len(new_connections),
+        'google_sheets_configured': GOOGLE_SCRIPT_URL is not None,
         'version': '1.0.0'
     })
 
@@ -744,5 +830,18 @@ if __name__ == '__main__':
     countries = set(person['country'] for person in company_data)
     logger.info(f"Departments: {', '.join(sorted(departments))}")
     logger.info(f"Countries: {', '.join(sorted(countries))}")
+    
+    print("\n" + "="*60)
+    print("SMART STAKEHOLDER SEARCH - SERVER STARTED")
+    print("="*60)
+    print(f"Server running at: http://localhost:5000")
+    print(f"Landing page: http://localhost:5000/")
+    print(f"Explore org: http://localhost:5000/explore")
+    print(f"Add connections: http://localhost:5000/add-connection")
+    print(f"View connections: http://localhost:5000/api/connections")
+    print(f"Google Sheets: {'Configured' if GOOGLE_SCRIPT_URL else 'Not configured'}")
+    print("="*60)
+    print("Ready to accept connections!")
+    print("="*60)
     
     app.run(debug=True, port=5000)

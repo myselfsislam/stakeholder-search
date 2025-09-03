@@ -32,6 +32,7 @@ async function loadAllEmployees() {
         console.log('Loading all employees for autocomplete...');
         const response = await fetch('/api/search?q='); // Empty query to get all employees
         if (!response.ok) {
+            console.error('HTTP error! status:', response.status);
             throw new Error('HTTP error! status: ' + response.status);
         }
         const employees = await response.json();
@@ -39,6 +40,7 @@ async function loadAllEmployees() {
         console.log('Loaded', employees.length, 'employees for autocomplete');
     } catch (error) {
         console.error('Error loading employees:', error);
+        allEmployees = []; // Fallback to empty array
     }
 }
 
@@ -47,15 +49,21 @@ function setupAutocomplete() {
     loadAllEmployees();
     
     const searchInput = document.getElementById('search');
-    if (!searchInput) return;
+    if (!searchInput) {
+        console.warn('Search input not found');
+        return;
+    }
     
     // Create autocomplete dropdown container
-    const autocompleteContainer = document.createElement('div');
-    autocompleteContainer.id = 'autocomplete-dropdown';
-    autocompleteContainer.className = 'autocomplete-dropdown hidden';
-    
-    // Insert after search input
-    searchInput.parentNode.appendChild(autocompleteContainer);
+    let autocompleteContainer = document.getElementById('autocomplete-dropdown');
+    if (!autocompleteContainer) {
+        autocompleteContainer = document.createElement('div');
+        autocompleteContainer.id = 'autocomplete-dropdown';
+        autocompleteContainer.className = 'autocomplete-dropdown hidden';
+        
+        // Insert after search input's parent
+        searchInput.parentNode.appendChild(autocompleteContainer);
+    }
     
     // Add input event listener for real-time search
     searchInput.addEventListener('input', function(e) {
@@ -100,7 +108,10 @@ function setupAutocomplete() {
 // Show autocomplete dropdown with employee suggestions
 function showAutocomplete(matches) {
     const dropdown = document.getElementById('autocomplete-dropdown');
-    if (!dropdown) return;
+    if (!dropdown) {
+        console.warn('Autocomplete dropdown not found');
+        return;
+    }
     
     if (matches.length === 0) {
         hideAutocomplete();
@@ -180,6 +191,7 @@ async function searchEmployees() {
     
     if (!searchInput) {
         console.error('Search input not found');
+        alert('Search input not found on page');
         return;
     }
     
@@ -197,21 +209,31 @@ async function searchEmployees() {
     });
     
     try {
+        console.log('Making search request to:', '/api/search?' + params.toString());
         const response = await fetch('/api/search?' + params);
+        
         if (!response.ok) {
-            throw new Error('HTTP error! status: ' + response.status);
+            console.error('Search API response not OK:', response.status, response.statusText);
+            throw new Error(`HTTP error! status: ${response.status}`);
         }
+        
         const results = await response.json();
         console.log('Search results:', results);
         
         if (results.length > 0) {
-            selectPerson(results[0].name);
+            // Find exact match first, then fallback to first result
+            let selectedPerson = results.find(person => 
+                person.name.toLowerCase() === query.toLowerCase()
+            ) || results[0];
+            
+            console.log('Selected person:', selectedPerson);
+            selectPerson(selectedPerson.name);
         } else {
             alert('No results found. Please try a different name.');
         }
     } catch (error) {
         console.error('Error searching:', error);
-        alert('Error searching. Please check if the Flask server is running.');
+        alert('Error searching: ' + error.message + '. Please check if the Flask server is running on the correct port.');
     }
 }
 
@@ -219,50 +241,88 @@ async function searchEmployees() {
 async function selectPerson(personName) {
     console.log('Selecting person:', personName);
     currentPerson = personName;
-    document.getElementById('visualization-container').classList.remove('hidden');
+    
+    const visualizationContainer = document.getElementById('visualization-container');
+    if (visualizationContainer) {
+        visualizationContainer.classList.remove('hidden');
+    } else {
+        console.error('Visualization container not found');
+    }
+    
     hideAutocomplete(); // Hide dropdown when person is selected
     
-    await loadOrgChart();
-    await loadMap();
+    try {
+        await loadOrgChart();
+        await loadMap();
+    } catch (error) {
+        console.error('Error loading person data:', error);
+    }
 }
 
 // Load organizational chart data from API
 async function loadOrgChart() {
-    if (!currentPerson) return;
+    if (!currentPerson) {
+        console.error('No current person selected');
+        return;
+    }
     
     console.log('Loading org chart for:', currentPerson);
     
     try {
-        const response = await fetch('/api/hierarchy/' + encodeURIComponent(currentPerson));
-        if (!response.ok) {
-            throw new Error('HTTP error! status: ' + response.status);
-        }
-        const hierarchyData = await response.json();
+        const encodedName = encodeURIComponent(currentPerson);
+        const url = `/api/hierarchy/${encodedName}`;
+        console.log('Making hierarchy request to:', url);
         
+        const response = await fetch(url);
+        
+        if (!response.ok) {
+            console.error('Hierarchy API response not OK:', response.status, response.statusText);
+            const errorText = await response.text();
+            console.error('Error response body:', errorText);
+            throw new Error(`HTTP error! status: ${response.status} - ${response.statusText}`);
+        }
+        
+        const hierarchyData = await response.json();
         console.log('Hierarchy data received:', hierarchyData);
+        
+        if (!hierarchyData) {
+            throw new Error('No hierarchy data received');
+        }
+        
         renderOrgChart(hierarchyData);
     } catch (error) {
         console.error('Error loading hierarchy:', error);
-        alert('Error loading organizational chart. Please check if the Flask server is running.');
+        alert('Error loading organizational chart: ' + error.message);
     }
 }
 
 // Load map data from API
 async function loadMap() {
-    if (!currentPerson) return;
+    if (!currentPerson) {
+        console.error('No current person selected');
+        return;
+    }
     
     try {
-        const response = await fetch('/api/map-data/' + encodeURIComponent(currentPerson));
-        if (!response.ok) {
-            throw new Error('HTTP error! status: ' + response.status);
-        }
-        const mapData = await response.json();
+        const encodedName = encodeURIComponent(currentPerson);
+        const url = `/api/map-data/${encodedName}`;
+        console.log('Making map data request to:', url);
         
+        const response = await fetch(url);
+        
+        if (!response.ok) {
+            console.error('Map API response not OK:', response.status, response.statusText);
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        const mapData = await response.json();
         console.log('Map data received:', mapData);
+        
         renderMap(mapData);
     } catch (error) {
         console.error('Error loading map data:', error);
-        alert('Error loading map. Please check if the Flask server is running.');
+        // Don't show alert for map errors as it's secondary functionality
+        console.warn('Map functionality disabled due to error');
     }
 }
 
@@ -313,34 +373,37 @@ function analyzeBusinessOpportunities(data) {
 }
 
 // Display business opportunity information banner
-// function displayBusinessOpportunityInfo(stats) {
-//     const infoContainer = document.getElementById('business-opportunity-info');
-//     if (!infoContainer) return;
+function displayBusinessOpportunityInfo(stats) {
+    const infoContainer = document.getElementById('business-opportunity-info');
+    if (!infoContainer) {
+        console.warn('Business opportunity info container not found');
+        return;
+    }
     
-//     let content = '';
+    let content = '';
     
-//     if (stats.direct > 0) {
-//         const plural = stats.direct > 1 ? 's' : '';
-//         content += '<div class="business-opportunity-banner">' +
-//             '<span class="opportunity-icon">🎯</span>' +
-//             '<strong>SALES OPPORTUNITY ALERT!</strong> ' +
-//             'You have ' + stats.direct + ' direct connection' + plural + ' in this team - ' +
-//             'Perfect for sales introductions!' +
-//             '</div>';
-//     }
+    if (stats.direct > 0) {
+        const plural = stats.direct > 1 ? 's' : '';
+        content += '<div class="business-opportunity-banner">' +
+            '<span class="opportunity-icon">🎯</span>' +
+            '<strong>SALES OPPORTUNITY ALERT!</strong> ' +
+            'You have ' + stats.direct + ' direct connection' + plural + ' in this team - ' +
+            'Perfect for sales introductions!' +
+            '</div>';
+    }
     
-//     if (stats.indirect > 0 && stats.direct === 0) {
-//         const plural = stats.indirect > 1 ? 's' : '';
-//         content += '<div class="business-opportunity-banner">' +
-//             '<span class="opportunity-icon">💼</span>' +
-//             '<strong>BUSINESS DEVELOPMENT OPPORTUNITY!</strong> ' +
-//             stats.indirect + ' indirect connection' + plural + ' found - ' +
-//             'Consider warm introductions for sales outreach.' +
-//             '</div>';
-//     }
+    if (stats.indirect > 0 && stats.direct === 0) {
+        const plural = stats.indirect > 1 ? 's' : '';
+        content += '<div class="business-opportunity-banner">' +
+            '<span class="opportunity-icon">💼</span>' +
+            '<strong>BUSINESS DEVELOPMENT OPPORTUNITY!</strong> ' +
+            stats.indirect + ' indirect connection' + plural + ' found - ' +
+            'Consider warm introductions for sales outreach.' +
+            '</div>';
+    }
     
-//     infoContainer.innerHTML = content;
-// }
+    infoContainer.innerHTML = content;
+}
 
 // Analyze representative connections for champion identification
 function analyzeRepresentatives(data) {
@@ -393,7 +456,10 @@ function displayConnectionChampions(representatives) {
     const championsCard = document.getElementById('champions-card');
     const championsGrid = document.getElementById('champions-grid');
     
-    if (!championsCard || !championsGrid) return;
+    if (!championsCard || !championsGrid) {
+        console.warn('Champions card elements not found');
+        return;
+    }
     
     if (representatives.length === 0) {
         championsCard.classList.add('hidden');
@@ -429,21 +495,29 @@ function displayConnectionChampions(representatives) {
     });
 }
 
-// Render the main organizational chart - COMPLETE HIERARCHY CHAIN
+// Render the main organizational chart
 function renderOrgChart(data) {
-    console.log('Rendering COMPLETE hierarchy chain:', data);
+    console.log('Rendering organizational chart with data:', data);
     
     const container = d3.select("#org-chart");
+    if (container.empty()) {
+        console.error('Org chart container not found');
+        alert('Chart container not found on page');
+        return;
+    }
+    
     container.selectAll("*").remove();
     
     const containerNode = container.node();
     if (!containerNode) {
-        console.error('Org chart container not found');
+        console.error('Org chart container node not found');
         return;
     }
     
-    const width = containerNode.getBoundingClientRect().width;
+    const width = containerNode.getBoundingClientRect().width || 800;
     const height = 800;
+    
+    console.log('Chart container dimensions:', width, 'x', height);
     
     // Analyze and display stats for the complete visible hierarchy
     const connectionStats = analyzeBusinessOpportunities(data);
@@ -463,8 +537,6 @@ function renderOrgChart(data) {
     
     globalSvg = svg;
     
-    // ZOOM DISABLED - no zoom functionality
-    
     const g = svg.append("g")
         .attr("transform", "translate(40,40)");
     
@@ -473,7 +545,13 @@ function renderOrgChart(data) {
     // Create hierarchy maintaining the complete chain
     globalRoot = buildHierarchyChain(data);
     
-    console.log('Complete hierarchy chain built');
+    if (!globalRoot) {
+        console.error('Failed to build hierarchy chain');
+        alert('Failed to build organizational chart structure');
+        return;
+    }
+    
+    console.log('Hierarchy chain built successfully');
     logHierarchyStructure(globalRoot);
     
     updateCompleteChart();
@@ -481,6 +559,11 @@ function renderOrgChart(data) {
 
 // Build hierarchy chain showing path from root to current focus + immediate reports
 function buildHierarchyChain(data) {
+    if (!data) {
+        console.error('No data provided to buildHierarchyChain');
+        return null;
+    }
+    
     const root = {
         data: data,
         children: [],
@@ -490,7 +573,7 @@ function buildHierarchyChain(data) {
     };
     
     // Add all immediate children
-    if (data.children && data.children.length > 0) {
+    if (data.children && Array.isArray(data.children) && data.children.length > 0) {
         root.children = data.children.map((child, index) => ({
             data: child,
             parent: root,
@@ -508,15 +591,24 @@ function buildHierarchyChain(data) {
 // Log hierarchy structure for debugging
 function logHierarchyStructure(root) {
     console.log('=== HIERARCHY STRUCTURE ===');
+    if (!root || !root.data) {
+        console.log('Invalid root structure');
+        return;
+    }
+    
     console.log('Root:', root.data.name, '- Level:', root.level);
-    if (root.children) {
+    if (root.children && root.children.length > 0) {
         console.log('Direct reports (' + root.children.length + '):');
         root.children.forEach((child, i) => {
-            console.log(`  ${i+1}. ${child.data.name} (${child.data.position})`);
-            if (child._children && child._children.length > 0) {
-                console.log(`     Has ${child._children.length} subordinates`);
+            if (child.data) {
+                console.log(`  ${i+1}. ${child.data.name} (${child.data.position || 'No position'})`);
+                if (child._children && child._children.length > 0) {
+                    console.log(`     Has ${child._children.length} subordinates`);
+                }
             }
         });
+    } else {
+        console.log('No direct reports');
     }
     console.log('===========================');
 }
@@ -524,7 +616,7 @@ function logHierarchyStructure(root) {
 // Update chart showing complete hierarchy chain
 function updateCompleteChart() {
     if (!globalRoot || !globalG) {
-        console.error('Global references missing');
+        console.error('Global references missing for chart update');
         return;
     }
     
@@ -532,21 +624,21 @@ function updateCompleteChart() {
     
     // Create flat list of all visible nodes
     const nodes = [globalRoot];
-    if (globalRoot.children) {
+    if (globalRoot.children && globalRoot.children.length > 0) {
         nodes.push(...globalRoot.children);
     }
     
     // Create links from root to each child
     const links = globalRoot.children || [];
     
-    console.log('Chart update - showing', nodes.length, 'nodes');
+    console.log('Chart update - showing', nodes.length, 'nodes and', links.length, 'links');
     
     // Position nodes vertically
     positionCompleteHierarchy(nodes);
     
     // Update connecting lines
     const link = globalG.selectAll('.link')
-        .data(links, d => d.data.name);
+        .data(links, d => d.data ? d.data.name : 'unknown');
     
     const linkEnter = link.enter().insert('line', "g")
         .attr("class", "link")
@@ -575,7 +667,7 @@ function updateCompleteChart() {
     
     // Update nodes
     const node = globalG.selectAll('.node')
-        .data(nodes, d => d.data.name);
+        .data(nodes, d => d.data ? d.data.name : 'unknown-' + Math.random());
     
     const nodeEnter = node.enter().append('g')
         .attr('class', 'node complete-node')
@@ -621,7 +713,7 @@ function updateCompleteChart() {
         .attr('r', 25)
         .style('fill', d => {
             const colors = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#06B6D4', '#F97316', '#84CC16'];
-            const name = d.data.name || '';
+            const name = d.data ? d.data.name || '' : '';
             const index = name.length % colors.length;
             return colors[index];
         })
@@ -639,7 +731,7 @@ function updateCompleteChart() {
         .style('font-weight', '600')
         .style('fill', '#ffffff')
         .text(d => {
-            const name = d.data.name || '';
+            const name = d.data ? d.data.name || '' : '';
             return name.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2);
         });
     
@@ -654,7 +746,7 @@ function updateCompleteChart() {
         .style('font-weight', '700')
         .style('fill', '#1F2937')
         .text(d => {
-            const name = d.data.name || '';
+            const name = d.data ? d.data.name || '' : '';
             return name.length > 20 ? name.substring(0, 18) + '...' : name;
         });
     
@@ -669,7 +761,7 @@ function updateCompleteChart() {
         .style('font-weight', '500')
         .style('fill', '#6B7280')
         .text(d => {
-            const position = d.data.position || '';
+            const position = d.data ? d.data.position || '' : '';
             return position.length > 24 ? position.substring(0, 22) + '...' : position;
         });
     
@@ -684,7 +776,7 @@ function updateCompleteChart() {
         .style('font-weight', '400')
         .style('fill', '#9CA3AF')
         .text(d => {
-            const location = d.data.location || d.data.country || '';
+            const location = d.data ? (d.data.location || d.data.country || '') : '';
             return location.length > 30 ? location.substring(0, 28) + '...' : location;
         });
     
@@ -695,7 +787,7 @@ function updateCompleteChart() {
         .attr('cy', -25)
         .attr('r', 6)
         .style('fill', d => {
-            const relationship = d.data.relationship_with_qt || 'None';
+            const relationship = d.data ? d.data.relationship_with_qt || 'None' : 'None';
             switch(relationship.toLowerCase()) {
                 case 'direct': return '#10B981';
                 case 'indirect': return '#F59E0B';
@@ -705,39 +797,7 @@ function updateCompleteChart() {
         .style('stroke', '#ffffff')
         .style('stroke-width', '2px');
     
-    // Add reports counter
-    const reportsGroup = nodeEnter.append('g')
-        .attr('class', 'reports-counter')
-        .style('display', d => {
-            const reportCount = d._children ? d._children.length : 0;
-            return reportCount > 0 ? 'block' : 'none';
-        });
-    
-    reportsGroup.append('rect')
-        .attr('x', 95)
-        .attr('y', 18)
-        .attr('width', 32)
-        .attr('height', 16)
-        .attr('rx', 8)
-        .attr('ry', 8)
-        .style('fill', '#F3F4F6')
-        .style('stroke', '#E5E7EB')
-        .style('stroke-width', '1px');
-    
-    reportsGroup.append('text')
-        .attr('x', 111)
-        .attr('y', 28)
-        .attr('text-anchor', 'middle')
-        .style('font-family', 'Inter, sans-serif')
-        .style('font-size', '10px')
-        .style('font-weight', '600')
-        .style('fill', '#6B7280')
-        .text(d => {
-            const reportCount = d._children ? d._children.length : 0;
-            return reportCount > 99 ? '99+' : reportCount.toString();
-        });
-    
-    // Add expand button - only show for nodes with reports
+    // Add expand button for nodes with children
     const expandButton = nodeEnter.append('g')
         .attr('class', 'expand-button')
         .style('display', d => {
@@ -776,11 +836,16 @@ function updateCompleteChart() {
         .style('opacity', 0)
         .remove();
     
-    console.log('Complete chart update finished');
+    console.log('Complete chart update finished successfully');
 }
 
 // Position nodes in complete hierarchy
 function positionCompleteHierarchy(nodes) {
+    if (!globalSvg) {
+        console.error('GlobalSvg not available for positioning');
+        return;
+    }
+    
     const containerWidth = globalSvg.node().getBoundingClientRect().width - 80;
     const centerX = containerWidth / 2;
     const cardSpacing = 120;
@@ -800,1363 +865,21 @@ function positionCompleteHierarchy(nodes) {
     console.log('Positioned', nodes.length, 'nodes in complete hierarchy');
 }
 
-// Handle node clicks - expand within current hierarchy, don't replace it
+// Handle node clicks - expand within current hierarchy
 function handleCompleteNodeClick(clickedNode) {
-    console.log('Complete node clicked:', clickedNode.data.name);
+    console.log('Complete node clicked:', clickedNode.data ? clickedNode.data.name : 'unknown');
     
     // If clicked node has no reports, do nothing
     if (!clickedNode._children || clickedNode._children.length === 0) {
-        console.log('No reports to show for:', clickedNode.data.name);
+        console.log('No reports to show for:', clickedNode.data ? clickedNode.data.name : 'unknown');
         return;
     }
     
-    // Toggle expansion of this node within the current hierarchy
-    if (clickedNode.isExpanded) {
-        // Collapse this node
-        clickedNode.isExpanded = false;
-        clickedNode.expandedChildren = null;
-        console.log('Collapsing:', clickedNode.data.name);
-    } else {
-        // Expand this node to show its children
-        clickedNode.isExpanded = true;
-        clickedNode.expandedChildren = clickedNode._children.map((child, index) => ({
-            data: child,
-            parent: clickedNode,
-            children: [],
-            _children: child.children || [],
-            isExpandedChild: true,
-            level: clickedNode.level + 1,
-            index: index
-        }));
-        console.log('Expanding:', clickedNode.data.name, 'showing', clickedNode.expandedChildren.length, 'reports');
-    }
-    
-    // Update the chart to show the new expanded state
-    updateCompleteChart();
+    // For now, just log the click - can be expanded later for drill-down functionality
+    console.log('Node has', clickedNode._children.length, 'subordinates');
 }
 
-// Update chart showing complete hierarchy with expansions
-function updateCompleteChart() {
-    if (!globalRoot || !globalG) {
-        console.error('Global references missing');
-        return;
-    }
-    
-    console.log('Updating complete hierarchy with expansions...');
-    
-    // Build flat list of all visible nodes including expanded ones
-    const nodes = [globalRoot];
-    const links = [];
-    
-    // Add immediate children (always visible)
-    if (globalRoot.children) {
-        nodes.push(...globalRoot.children);
-        // Add links from root to immediate children
-        globalRoot.children.forEach(child => {
-            links.push({ source: globalRoot, target: child });
-        });
-    }
-    
-    // Add expanded children for any expanded nodes
-    if (globalRoot.children) {
-        globalRoot.children.forEach(child => {
-            if (child.isExpanded && child.expandedChildren) {
-                nodes.push(...child.expandedChildren);
-                // Add links from expanded parent to its children
-                child.expandedChildren.forEach(grandchild => {
-                    links.push({ source: child, target: grandchild });
-                });
-            }
-        });
-    }
-    
-    console.log('Chart update - showing', nodes.length, 'nodes with', links.length, 'connections');
-    
-    // Position nodes in expanded hierarchy
-    positionExpandedHierarchy(nodes);
-    
-    // Update connecting lines
-    const link = globalG.selectAll('.link')
-        .data(links, d => `${d.source.data.name}-${d.target.data.name}`);
-    
-    const linkEnter = link.enter().insert('line', "g")
-        .attr("class", "link")
-        .style('stroke', '#C1C7CD')
-        .style('stroke-width', '2px')
-        .style('opacity', 0)
-        .attr('x1', 0)
-        .attr('y1', 0)
-        .attr('x2', 0)
-        .attr('y2', 0);
-    
-    const linkUpdate = linkEnter.merge(link);
-    
-    linkUpdate.transition()
-        .duration(500)
-        .style('opacity', 1)
-        .attr('x1', d => d.source.x || 0)
-        .attr('y1', d => (d.source.y || 0) + 42.5)
-        .attr('x2', d => d.target.x || 0)
-        .attr('y2', d => (d.target.y || 0) - 42.5);
-    
-    link.exit().transition()
-        .duration(500)
-        .style('opacity', 0)
-        .remove();
-    
-    // Update nodes
-    const node = globalG.selectAll('.node')
-        .data(nodes, d => d.data.name);
-    
-    const nodeEnter = node.enter().append('g')
-        .attr('class', 'node complete-node')
-        .attr("transform", d => `translate(${d.x || 0},${d.y || 0})`)
-        .on('click', function(event, d) { 
-            handleCompleteNodeClick(d); 
-        })
-        .style('cursor', 'pointer');
-    
-    // Add professional card background
-    nodeEnter.append('rect')
-        .attr('class', 'professional-card')
-        .attr('width', 280)
-        .attr('height', 85)
-        .attr('x', -140)
-        .attr('y', -42.5)
-        .attr('rx', 12)
-        .attr('ry', 12)
-        .style('fill', '#ffffff')
-        .style('stroke', d => {
-            if (d.isRoot) return '#0E3386';
-            if (d.isExpandedChild) return '#10B981';
-            return '#E5E7EB';
-        })
-        .style('stroke-width', d => (d.isRoot || d.isExpandedChild) ? '2px' : '1px')
-        .style('filter', 'drop-shadow(0 4px 6px rgba(0, 0, 0, 0.1))')
-        .style('transition', 'all 0.3s ease');
-    
-    // Add hover effects
-    nodeEnter.selectAll('.professional-card')
-        .on('mouseenter', function() {
-            d3.select(this)
-                .style('filter', 'drop-shadow(0 8px 25px rgba(0, 0, 0, 0.15))')
-                .style('transform', 'translateY(-2px)');
-        })
-        .on('mouseleave', function() {
-            d3.select(this)
-                .style('filter', 'drop-shadow(0 4px 6px rgba(0, 0, 0, 0.1))')
-                .style('transform', 'translateY(0)');
-        });
-    
-    // Add profile circle
-    nodeEnter.append('circle')
-        .attr('class', 'profile-circle')
-        .attr('cx', -90)
-        .attr('cy', 0)
-        .attr('r', 25)
-        .style('fill', d => {
-            const colors = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#06B6D4', '#F97316', '#84CC16'];
-            const name = d.data.name || '';
-            const index = name.length % colors.length;
-            return colors[index];
-        })
-        .style('stroke', '#ffffff')
-        .style('stroke-width', '3px');
-    
-    // Add profile initials
-    nodeEnter.append('text')
-        .attr('class', 'profile-initials')
-        .attr('x', -90)
-        .attr('y', 5)
-        .attr('text-anchor', 'middle')
-        .style('font-family', 'Inter, sans-serif')
-        .style('font-size', '14px')
-        .style('font-weight', '600')
-        .style('fill', '#ffffff')
-        .text(d => {
-            const name = d.data.name || '';
-            return name.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2);
-        });
-    
-    // Add employee name
-    nodeEnter.append('text')
-        .attr('class', 'employee-name')
-        .attr('x', -45)
-        .attr('y', -12)
-        .attr('text-anchor', 'start')
-        .style('font-family', 'Inter, sans-serif')
-        .style('font-size', '16px')
-        .style('font-weight', '700')
-        .style('fill', '#1F2937')
-        .text(d => {
-            const name = d.data.name || '';
-            return name.length > 20 ? name.substring(0, 18) + '...' : name;
-        });
-    
-    // Add position
-    nodeEnter.append('text')
-        .attr('class', 'employee-position')
-        .attr('x', -45)
-        .attr('y', 4)
-        .attr('text-anchor', 'start')
-        .style('font-family', 'Inter, sans-serif')
-        .style('font-size', '13px')
-        .style('font-weight', '500')
-        .style('fill', '#6B7280')
-        .text(d => {
-            const position = d.data.position || '';
-            return position.length > 24 ? position.substring(0, 22) + '...' : position;
-        });
-    
-    // Add location
-    nodeEnter.append('text')
-        .attr('class', 'employee-location')
-        .attr('x', -45)
-        .attr('y', 20)
-        .attr('text-anchor', 'start')
-        .style('font-family', 'Inter, sans-serif')
-        .style('font-size', '11px')
-        .style('font-weight', '400')
-        .style('fill', '#9CA3AF')
-        .text(d => {
-            const location = d.data.location || d.data.country || '';
-            return location.length > 30 ? location.substring(0, 28) + '...' : location;
-        });
-    
-    // Add connection status
-    nodeEnter.append('circle')
-        .attr('class', 'status-indicator')
-        .attr('cx', 115)
-        .attr('cy', -25)
-        .attr('r', 6)
-        .style('fill', d => {
-            const relationship = d.data.relationship_with_qt || 'None';
-            switch(relationship.toLowerCase()) {
-                case 'direct': return '#10B981';
-                case 'indirect': return '#F59E0B';
-                default: return '#D1D5DB';
-            }
-        })
-        .style('stroke', '#ffffff')
-        .style('stroke-width', '2px');
-    
-    // Add reports counter
-    const reportsGroup = nodeEnter.append('g')
-        .attr('class', 'reports-counter')
-        .style('display', d => {
-            const reportCount = d._children ? d._children.length : 0;
-            return reportCount > 0 ? 'block' : 'none';
-        });
-    
-    reportsGroup.append('rect')
-        .attr('x', 95)
-        .attr('y', 18)
-        .attr('width', 32)
-        .attr('height', 16)
-        .attr('rx', 8)
-        .attr('ry', 8)
-        .style('fill', '#F3F4F6')
-        .style('stroke', '#E5E7EB')
-        .style('stroke-width', '1px');
-    
-    reportsGroup.append('text')
-        .attr('x', 111)
-        .attr('y', 28)
-        .attr('text-anchor', 'middle')
-        .style('font-family', 'Inter, sans-serif')
-        .style('font-size', '10px')
-        .style('font-weight', '600')
-        .style('fill', '#6B7280')
-        .text(d => {
-            const reportCount = d._children ? d._children.length : 0;
-            return reportCount > 99 ? '99+' : reportCount.toString();
-        });
-    
-    // Add expand/collapse button
-    const expandButton = nodeEnter.append('g')
-        .attr('class', 'expand-button')
-        .style('display', d => {
-            const reportCount = d._children ? d._children.length : 0;
-            return reportCount > 0 ? 'block' : 'none';
-        });
-    
-    expandButton.append('circle')
-        .attr('cx', 0)
-        .attr('cy', 60)
-        .attr('r', 10)
-        .style('fill', '#ffffff')
-        .style('stroke', '#0E3386')
-        .style('stroke-width', '2px');
-    
-    expandButton.append('text')
-        .attr('x', 0)
-        .attr('y', 65)
-        .attr('text-anchor', 'middle')
-        .style('font-family', 'Inter, sans-serif')
-        .style('font-size', '12px')
-        .style('font-weight', '700')
-        .style('fill', '#0E3386')
-        .text(d => d.isExpanded ? '−' : '+');
-    
-    // Update existing nodes
-    const nodeUpdate = nodeEnter.merge(node);
-    
-    nodeUpdate.transition()
-        .duration(500)
-        .attr("transform", d => `translate(${d.x},${d.y})`);
-    
-    // Update expand button text
-    nodeUpdate.select('.expand-button text')
-        .text(d => d.isExpanded ? '−' : '+');
-    
-    // Remove exiting nodes
-    node.exit().transition()
-        .duration(500)
-        .style('opacity', 0)
-        .remove();
-    
-    console.log('Complete chart with expansions updated');
-}
-
-// Position nodes in expanded hierarchy maintaining management chain
-function positionExpandedHierarchy(nodes) {
-    const containerWidth = globalSvg.node().getBoundingClientRect().width - 80;
-    const centerX = containerWidth / 2;
-    const cardSpacing = 120;
-    const indentAmount = 50; // Indent expanded children
-    
-    let currentY = 80;
-    
-    // Position root at top
-    if (nodes[0]) {
-        nodes[0].x = centerX;
-        nodes[0].y = currentY;
-        currentY += cardSpacing + 40; // Extra space after root
-    }
-    
-    // Position immediate children and their expansions
-    for (let i = 1; i < nodes.length; i++) {
-        const node = nodes[i];
-        
-        if (node.isExpandedChild) {
-            // This is an expanded child - indent it
-            node.x = centerX + indentAmount;
-        } else {
-            // This is a direct child of root
-            node.x = centerX;
-        }
-        
-        node.y = currentY;
-        currentY += cardSpacing;
-    }
-    
-    console.log('Positioned', nodes.length, 'nodes in expanded hierarchy');
-}
-
-// Get data for immediate reports analysis (root + direct children only)
-function getImmediateReportsData(data) {
-    const flatData = {
-        name: data.name,
-        position: data.position,
-        department: data.department,
-        country: data.country,
-        location: data.location,
-        relationship_with_qt: data.relationship_with_qt,
-        representative_from_qt: data.representative_from_qt,
-        children: data.children || []
-    };
-    return flatData;
-}
-
-// Update chart with FLAT LAYOUT - only immediate reports
-function updateFlatChart() {
-    if (!globalRoot || !globalG) {
-        console.error('Global references missing for flat chart');
-        return;
-    }
-    
-    console.log('Updating FLAT chart layout...');
-    
-    // Create flat list: root + immediate children only
-    const nodes = [globalRoot];
-    if (globalRoot.children) {
-        nodes.push(...globalRoot.children);
-    }
-    
-    const links = globalRoot.children || [];
-    
-    console.log('Flat chart update - nodes:', nodes.length);
-    
-    // FLAT VERTICAL POSITIONING
-    positionNodesFlatVertical(nodes);
-    
-    // Update connecting lines
-    const link = globalG.selectAll('.link')
-        .data(links, d => d.data.name);
-    
-    const linkEnter = link.enter().insert('line', "g")
-        .attr("class", "link")
-        .style('stroke', '#C1C7CD')
-        .style('stroke-width', '2px')
-        .style('opacity', 0)
-        .attr('x1', 0)
-        .attr('y1', 0)
-        .attr('x2', 0)
-        .attr('y2', 0);
-    
-    const linkUpdate = linkEnter.merge(link);
-    
-    linkUpdate.transition()
-        .duration(500)
-        .style('opacity', 1)
-        .attr('x1', globalRoot.x || 0)
-        .attr('y1', (globalRoot.y || 0) + 42.5) // Bottom of parent card
-        .attr('x2', d => d.x || 0)
-        .attr('y2', d => (d.y || 0) - 42.5); // Top of child card
-    
-    link.exit().transition()
-        .duration(500)
-        .style('opacity', 0)
-        .remove();
-    
-    // Update nodes with PROFESSIONAL CARDS
-    const node = globalG.selectAll('.node')
-        .data(nodes, d => d.data.name);
-    
-    const nodeEnter = node.enter().append('g')
-        .attr('class', 'node flat-node')
-        .attr("transform", d => `translate(${d.x || 0},${d.y || 0})`)
-        .on('click', function(event, d) { 
-            if (d === globalRoot) return; // Don't allow clicking root
-            handleFlatNodeClick(d); 
-        })
-        .style('cursor', d => d === globalRoot ? 'default' : 'pointer');
-    
-    // Add PROFESSIONAL node background card
-    nodeEnter.append('rect')
-        .attr('class', 'professional-card')
-        .attr('width', 280)
-        .attr('height', 85)
-        .attr('x', -140)
-        .attr('y', -42.5)
-        .attr('rx', 12)
-        .attr('ry', 12)
-        .style('fill', '#ffffff')
-        .style('stroke', '#E5E7EB')
-        .style('stroke-width', '1px')
-        .style('filter', 'drop-shadow(0 4px 6px rgba(0, 0, 0, 0.1))')
-        .style('transition', 'all 0.3s ease');
-    
-    // Add hover effect (only for non-root nodes)
-    nodeEnter.filter(d => d !== globalRoot)
-        .selectAll('.professional-card')
-        .on('mouseenter', function() {
-            d3.select(this)
-                .style('filter', 'drop-shadow(0 8px 25px rgba(0, 0, 0, 0.15))')
-                .style('transform', 'translateY(-2px)');
-        })
-        .on('mouseleave', function() {
-            d3.select(this)
-                .style('filter', 'drop-shadow(0 4px 6px rgba(0, 0, 0, 0.1))')
-                .style('transform', 'translateY(0)');
-        });
-    
-    // Add PROFILE CIRCLE (left side)
-    nodeEnter.append('circle')
-        .attr('class', 'profile-circle')
-        .attr('cx', -90)
-        .attr('cy', 0)
-        .attr('r', 25)
-        .style('fill', d => {
-            const colors = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#06B6D4', '#F97316', '#84CC16'];
-            const name = d.data.name || '';
-            const index = name.length % colors.length;
-            return colors[index];
-        })
-        .style('stroke', '#ffffff')
-        .style('stroke-width', '3px');
-    
-    // Add PROFILE INITIALS
-    nodeEnter.append('text')
-        .attr('class', 'profile-initials')
-        .attr('x', -90)
-        .attr('y', 5)
-        .attr('text-anchor', 'middle')
-        .style('font-family', 'Inter, sans-serif')
-        .style('font-size', '14px')
-        .style('font-weight', '600')
-        .style('fill', '#ffffff')
-        .text(d => {
-            const name = d.data.name || '';
-            return name.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2);
-        });
-    
-    // Add EMPLOYEE NAME (primary text)
-    nodeEnter.append('text')
-        .attr('class', 'employee-name')
-        .attr('x', -45)
-        .attr('y', -12)
-        .attr('text-anchor', 'start')
-        .style('font-family', 'Inter, sans-serif')
-        .style('font-size', '16px')
-        .style('font-weight', '700')
-        .style('fill', '#1F2937')
-        .text(d => {
-            const name = d.data.name || '';
-            return name.length > 20 ? name.substring(0, 18) + '...' : name;
-        });
-    
-    // Add EMPLOYEE POSITION (secondary text)
-    nodeEnter.append('text')
-        .attr('class', 'employee-position')
-        .attr('x', -45)
-        .attr('y', 4)
-        .attr('text-anchor', 'start')
-        .style('font-family', 'Inter, sans-serif')
-        .style('font-size', '13px')
-        .style('font-weight', '500')
-        .style('fill', '#6B7280')
-        .text(d => {
-            const position = d.data.position || '';
-            return position.length > 24 ? position.substring(0, 22) + '...' : position;
-        });
-    
-    // Add LOCATION (tertiary text)
-    nodeEnter.append('text')
-        .attr('class', 'employee-location')
-        .attr('x', -45)
-        .attr('y', 20)
-        .attr('text-anchor', 'start')
-        .style('font-family', 'Inter, sans-serif')
-        .style('font-size', '11px')
-        .style('font-weight', '400')
-        .style('fill', '#9CA3AF')
-        .text(d => {
-            const location = d.data.location || d.data.country || '';
-            return location.length > 30 ? location.substring(0, 28) + '...' : location;
-        });
-    
-    // Add CONNECTION STATUS INDICATOR (top-right)
-    nodeEnter.append('circle')
-        .attr('class', 'status-indicator')
-        .attr('cx', 115)
-        .attr('cy', -25)
-        .attr('r', 6)
-        .style('fill', d => {
-            const relationship = d.data.relationship_with_qt || 'None';
-            switch(relationship.toLowerCase()) {
-                case 'direct': return '#10B981';
-                case 'indirect': return '#F59E0B';
-                default: return '#D1D5DB';
-            }
-        })
-        .style('stroke', '#ffffff')
-        .style('stroke-width', '2px');
-    
-    // Add REPORTS COUNTER (bottom-right) - only for nodes with children
-    const reportsGroup = nodeEnter.append('g')
-        .attr('class', 'reports-counter')
-        .style('display', d => {
-            const hasReports = d._children && d._children.length > 0;
-            return hasReports ? 'block' : 'none';
-        });
-    
-    reportsGroup.append('rect')
-        .attr('x', 95)
-        .attr('y', 18)
-        .attr('width', 32)
-        .attr('height', 16)
-        .attr('rx', 8)
-        .attr('ry', 8)
-        .style('fill', '#F3F4F6')
-        .style('stroke', '#E5E7EB')
-        .style('stroke-width', '1px');
-    
-    reportsGroup.append('text')
-        .attr('x', 111)
-        .attr('y', 28)
-        .attr('text-anchor', 'middle')
-        .style('font-family', 'Inter, sans-serif')
-        .style('font-size', '10px')
-        .style('font-weight', '600')
-        .style('fill', '#6B7280')
-        .text(d => {
-            const reportCount = d._children ? d._children.length : 0;
-            return reportCount > 99 ? '99+' : reportCount.toString();
-        });
-    
-    // Add EXPAND BUTTON (bottom center) - only for nodes with children
-    const expandButton = nodeEnter.append('g')
-        .attr('class', 'expand-button')
-        .style('display', d => {
-            const hasReports = d._children && d._children.length > 0;
-            return hasReports ? 'block' : 'none';
-        });
-    
-    expandButton.append('circle')
-        .attr('cx', 0)
-        .attr('cy', 60)
-        .attr('r', 10)
-        .style('fill', '#ffffff')
-        .style('stroke', '#0E3386')
-        .style('stroke-width', '2px');
-    
-    expandButton.append('text')
-        .attr('x', 0)
-        .attr('y', 65)
-        .attr('text-anchor', 'middle')
-        .style('font-family', 'Inter, sans-serif')
-        .style('font-size', '12px')
-        .style('font-weight', '700')
-        .style('fill', '#0E3386')
-        .text('+');
-    
-    // Merge and update existing nodes
-    const nodeUpdate = nodeEnter.merge(node);
-    
-    nodeUpdate.transition()
-        .duration(500)
-        .attr("transform", d => `translate(${d.x},${d.y})`);
-    
-    // Remove exiting nodes
-    node.exit().transition()
-        .duration(500)
-        .style('opacity', 0)
-        .remove();
-    
-    console.log('FLAT chart update complete');
-}
-
-// Position nodes in FLAT VERTICAL STACK
-function positionNodesFlatVertical(nodes) {
-    const containerWidth = globalSvg.node().getBoundingClientRect().width - 80;
-    const centerX = containerWidth / 2;
-    const cardSpacing = 120; // Space between cards vertically
-    
-    // Position root at top
-    if (nodes[0]) {
-        nodes[0].x = centerX;
-        nodes[0].y = 80;
-    }
-    
-    // Position immediate children vertically below root
-    for (let i = 1; i < nodes.length; i++) {
-        nodes[i].x = centerX;
-        nodes[i].y = 200 + ((i - 1) * cardSpacing);
-    }
-    
-    console.log('Positioned', nodes.length, 'nodes in flat vertical layout');
-}
-
-// Handle click on nodes in flat layout - expand to show that person's reports
-function handleFlatNodeClick(clickedNode) {
-    console.log('Flat node clicked:', clickedNode.data.name);
-    
-    if (!clickedNode._children || clickedNode._children.length === 0) {
-        console.log('No reports to show for:', clickedNode.data.name);
-        return;
-    }
-    
-    // Load new flat hierarchy for the clicked person
-    selectPerson(clickedNode.data.name);
-}
-
-// Update chart with VERTICAL LAYOUT for immediate reports
-function updateVerticalChart(source) {
-    if (!globalRoot || !globalG) {
-        console.error('Global references missing for vertical chart');
-        return;
-    }
-    
-    console.log('Updating VERTICAL chart layout...');
-    
-    const nodes = globalRoot.descendants();
-    const links = globalRoot.descendants().slice(1);
-    
-    console.log('Vertical chart update - nodes:', nodes.length, 'links:', links.length);
-    
-    // VERTICAL POSITIONING: Stack cards vertically
-    positionNodesVertically(nodes);
-    
-    // Update links for vertical layout
-    const link = globalG.selectAll('.link')
-        .data(links, d => d.id);
-    
-    const linkEnter = link.enter().insert('line', "g")
-        .attr("class", "link")
-        .style('stroke', '#C1C7CD')
-        .style('stroke-width', '2px')
-        .style('opacity', 0)
-        .attr('x1', source.x0 || 0)
-        .attr('y1', source.y0 || 0)
-        .attr('x2', source.x0 || 0)
-        .attr('y2', source.y0 || 0);
-    
-    const linkUpdate = linkEnter.merge(link);
-    
-    linkUpdate.transition()
-        .duration(500)
-        .style('opacity', 1)
-        .attr('x1', d => d.parent.x)
-        .attr('y1', d => d.parent.y + 42.5) // Bottom of parent card
-        .attr('x2', d => d.x)
-        .attr('y2', d => d.y - 42.5); // Top of child card
-    
-    link.exit().transition()
-        .duration(500)
-        .style('opacity', 0)
-        .remove();
-    
-    // Update nodes with PROFESSIONAL CARDS
-    const node = globalG.selectAll('.node')
-        .data(nodes, d => d.id);
-    
-    const nodeEnter = node.enter().append('g')
-        .attr('class', 'node professional-node')
-        .attr("transform", d => `translate(${source.x0 || source.x || 0},${source.y0 || source.y || 0})`)
-        .on('click', function(event, d) { 
-            toggleVertical(d); 
-        })
-        .style('cursor', 'pointer');
-    
-    // Add PROFESSIONAL node background card
-    nodeEnter.append('rect')
-        .attr('class', 'professional-card')
-        .attr('width', 280)
-        .attr('height', 85)
-        .attr('x', -140)
-        .attr('y', -42.5)
-        .attr('rx', 12)
-        .attr('ry', 12)
-        .style('fill', '#ffffff')
-        .style('stroke', '#E5E7EB')
-        .style('stroke-width', '1px')
-        .style('filter', 'drop-shadow(0 4px 6px rgba(0, 0, 0, 0.1))')
-        .style('transition', 'all 0.3s ease');
-    
-    // Add hover effect
-    nodeEnter.selectAll('.professional-card')
-        .on('mouseenter', function() {
-            d3.select(this)
-                .style('filter', 'drop-shadow(0 8px 25px rgba(0, 0, 0, 0.15))')
-                .style('transform', 'translateY(-2px)');
-        })
-        .on('mouseleave', function() {
-            d3.select(this)
-                .style('filter', 'drop-shadow(0 4px 6px rgba(0, 0, 0, 0.1))')
-                .style('transform', 'translateY(0)');
-        });
-    
-    // Add PROFILE CIRCLE (left side)
-    nodeEnter.append('circle')
-        .attr('class', 'profile-circle')
-        .attr('cx', -90)
-        .attr('cy', 0)
-        .attr('r', 25)
-        .style('fill', d => {
-            const colors = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#06B6D4', '#F97316', '#84CC16'];
-            const name = d.data.name || '';
-            const index = name.length % colors.length;
-            return colors[index];
-        })
-        .style('stroke', '#ffffff')
-        .style('stroke-width', '3px');
-    
-    // Add PROFILE INITIALS
-    nodeEnter.append('text')
-        .attr('class', 'profile-initials')
-        .attr('x', -90)
-        .attr('y', 5)
-        .attr('text-anchor', 'middle')
-        .style('font-family', 'Inter, sans-serif')
-        .style('font-size', '14px')
-        .style('font-weight', '600')
-        .style('fill', '#ffffff')
-        .text(d => {
-            const name = d.data.name || '';
-            return name.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2);
-        });
-    
-    // Add EMPLOYEE NAME (primary text)
-    nodeEnter.append('text')
-        .attr('class', 'employee-name')
-        .attr('x', -45)
-        .attr('y', -12)
-        .attr('text-anchor', 'start')
-        .style('font-family', 'Inter, sans-serif')
-        .style('font-size', '16px')
-        .style('font-weight', '700')
-        .style('fill', '#1F2937')
-        .text(d => {
-            const name = d.data.name || '';
-            return name.length > 20 ? name.substring(0, 18) + '...' : name;
-        });
-    
-    // Add EMPLOYEE POSITION (secondary text)
-    nodeEnter.append('text')
-        .attr('class', 'employee-position')
-        .attr('x', -45)
-        .attr('y', 4)
-        .attr('text-anchor', 'start')
-        .style('font-family', 'Inter, sans-serif')
-        .style('font-size', '13px')
-        .style('font-weight', '500')
-        .style('fill', '#6B7280')
-        .text(d => {
-            const position = d.data.position || '';
-            return position.length > 24 ? position.substring(0, 22) + '...' : position;
-        });
-    
-    // Add LOCATION (tertiary text)
-    nodeEnter.append('text')
-        .attr('class', 'employee-location')
-        .attr('x', -45)
-        .attr('y', 20)
-        .attr('text-anchor', 'start')
-        .style('font-family', 'Inter, sans-serif')
-        .style('font-size', '11px')
-        .style('font-weight', '400')
-        .style('fill', '#9CA3AF')
-        .text(d => {
-            const location = d.data.location || d.data.country || '';
-            return location.length > 30 ? location.substring(0, 28) + '...' : location;
-        });
-    
-    // Add CONNECTION STATUS INDICATOR (top-right)
-    nodeEnter.append('circle')
-        .attr('class', 'status-indicator')
-        .attr('cx', 115)
-        .attr('cy', -25)
-        .attr('r', 6)
-        .style('fill', d => {
-            const relationship = d.data.relationship_with_qt || 'None';
-            switch(relationship.toLowerCase()) {
-                case 'direct': return '#10B981';
-                case 'indirect': return '#F59E0B';
-                default: return '#D1D5DB';
-            }
-        })
-        .style('stroke', '#ffffff')
-        .style('stroke-width', '2px');
-    
-    // Add REPORTS COUNTER (bottom-right)
-    const reportsGroup = nodeEnter.append('g')
-        .attr('class', 'reports-counter')
-        .style('display', d => {
-            const totalReports = (d._children ? d._children.length : 0) + (d.children ? d.children.length : 0);
-            return totalReports > 0 ? 'block' : 'none';
-        });
-    
-    reportsGroup.append('rect')
-        .attr('x', 95)
-        .attr('y', 18)
-        .attr('width', 32)
-        .attr('height', 16)
-        .attr('rx', 8)
-        .attr('ry', 8)
-        .style('fill', '#F3F4F6')
-        .style('stroke', '#E5E7EB')
-        .style('stroke-width', '1px');
-    
-    reportsGroup.append('text')
-        .attr('x', 111)
-        .attr('y', 28)
-        .attr('text-anchor', 'middle')
-        .style('font-family', 'Inter, sans-serif')
-        .style('font-size', '10px')
-        .style('font-weight', '600')
-        .style('fill', '#6B7280')
-        .text(d => {
-            const totalReports = (d._children ? d._children.length : 0) + (d.children ? d.children.length : 0);
-            return totalReports > 99 ? '99+' : totalReports.toString();
-        });
-    
-    // Add EXPAND/COLLAPSE BUTTON (bottom center)
-    const expandButton = nodeEnter.append('g')
-        .attr('class', 'expand-button')
-        .style('display', d => (d._children || (d.children && d.children.length > 0)) ? 'block' : 'none');
-    
-    expandButton.append('circle')
-        .attr('cx', 0)
-        .attr('cy', 60)
-        .attr('r', 10)
-        .style('fill', '#ffffff')
-        .style('stroke', '#0E3386')
-        .style('stroke-width', '2px');
-    
-    expandButton.append('text')
-        .attr('x', 0)
-        .attr('y', 65)
-        .attr('text-anchor', 'middle')
-        .style('font-family', 'Inter, sans-serif')
-        .style('font-size', '12px')
-        .style('font-weight', '700')
-        .style('fill', '#0E3386')
-        .text(d => (d.children && d.children.length > 0) ? '−' : '+');
-    
-    // Merge and update existing nodes
-    const nodeUpdate = nodeEnter.merge(node);
-    
-    nodeUpdate.transition()
-        .duration(500)
-        .attr("transform", d => `translate(${d.x},${d.y})`);
-    
-    // Update expand button
-    nodeUpdate.select('.expand-button text')
-        .text(d => (d.children && d.children.length > 0) ? '−' : '+');
-    
-    nodeUpdate.select('.expand-button')
-        .style('display', d => (d._children || (d.children && d.children.length > 0)) ? 'block' : 'none');
-    
-    // Update reports counter
-    nodeUpdate.select('.reports-counter')
-        .style('display', d => {
-            const totalReports = (d._children ? d._children.length : 0) + (d.children ? d.children.length : 0);
-            return totalReports > 0 ? 'block' : 'none';
-        });
-    
-    nodeUpdate.select('.reports-counter text')
-        .text(d => {
-            const totalReports = (d._children ? d._children.length : 0) + (d.children ? d.children.length : 0);
-            return totalReports > 99 ? '99+' : totalReports.toString();
-        });
-    
-    // Remove exiting nodes
-    node.exit().transition()
-        .duration(500)
-        .attr("transform", d => `translate(${source.x},${source.y})`)
-        .style('opacity', 0)
-        .remove();
-    
-    // Store positions for next time
-    nodes.forEach(d => {
-        d.x0 = d.x;
-        d.y0 = d.y;
-    });
-    
-    console.log('VERTICAL chart update complete');
-}
-
-// Position nodes in VERTICAL STACK (not horizontal spread)
-function positionNodesVertically(nodes) {
-    const containerWidth = globalSvg.node().getBoundingClientRect().width - 80;
-    const centerX = containerWidth / 2;
-    const cardSpacing = 120; // Space between cards vertically
-    
-    // Root at top center
-    const rootNode = nodes.find(n => n.depth === 0);
-    if (rootNode) {
-        rootNode.x = centerX;
-        rootNode.y = 80;
-    }
-    
-    // Stack all children vertically below root
-    const childNodes = nodes.filter(n => n.depth === 1).sort((a, b) => {
-        // Sort alphabetically by name for consistent ordering
-        return (a.data.name || '').localeCompare(b.data.name || '');
-    });
-    
-    childNodes.forEach((node, index) => {
-        node.x = centerX; // All at same X position (centered)
-        node.y = 200 + (index * cardSpacing); // Stack vertically
-    });
-    
-    console.log('Positioned', nodes.length, 'nodes in vertical stack');
-}
-
-// Toggle for vertical layout - show/hide children of clicked node
-function toggleVertical(d) {
-    console.log('Vertical toggle called for:', d.data.name);
-    
-    if (d.children) {
-        d._children = d.children;
-        d.children = null;
-    } else {
-        d.children = d._children;
-        d._children = null;
-    }
-    updateVerticalChart(d);
-}
-
-// Update chart with PROFESSIONAL LAYOUT - FIXED SPACING VERSION
-function updateProfessionalChart(source) {
-    if (!globalRoot || !globalG) {
-        console.error('Global references missing for professional chart');
-        return;
-    }
-    
-    console.log('Updating PROFESSIONAL chart with proper spacing...');
-    
-    // Use D3 tree layout with WIDER spacing for 280px cards
-    const containerWidth = globalSvg.node().getBoundingClientRect().width - 80;
-    const treeLayout = d3.tree().size([containerWidth - 200, 600]);
-    const treeData = treeLayout(globalRoot);
-    
-    const nodes = treeData.descendants();
-    const links = treeData.descendants().slice(1);
-    
-    console.log('Professional chart update - nodes:', nodes.length, 'links:', links.length);
-    
-    // FIXED SPACING: Ensure minimum distance between cards
-    const cardWidth = 280;
-    const minHorizontalGap = 40; // Gap between cards
-    const minDistance = cardWidth + minHorizontalGap; // 320px minimum distance
-    
-    // Adjust horizontal positions to prevent overlap
-    const nodesByLevel = {};
-    nodes.forEach(node => {
-        if (!nodesByLevel[node.depth]) {
-            nodesByLevel[node.depth] = [];
-        }
-        nodesByLevel[node.depth].push(node);
-    });
-    
-    // Fix positioning for each level
-    Object.keys(nodesByLevel).forEach(depth => {
-        const levelNodes = nodesByLevel[depth];
-        if (levelNodes.length > 1) {
-            // Sort nodes by their current x position
-            levelNodes.sort((a, b) => a.x - b.x);
-            
-            // Adjust positions to ensure minimum spacing
-            for (let i = 1; i < levelNodes.length; i++) {
-                const prevNode = levelNodes[i - 1];
-                const currentNode = levelNodes[i];
-                const minX = prevNode.x + minDistance;
-                
-                if (currentNode.x < minX) {
-                    currentNode.x = minX;
-                }
-            }
-        }
-    });
-    
-    // Increase vertical spacing for better hierarchy visibility
-    nodes.forEach(d => { 
-        d.y = d.depth * 180; // Increased from 160px to 180px
-    });
-    
-    // Update links with professional styling
-    const link = globalG.selectAll('.link')
-        .data(links, d => d.id);
-    
-    const linkEnter = link.enter().insert('path', "g")
-        .attr("class", "link")
-        .style('fill', 'none')
-        .style('stroke', '#C1C7CD')
-        .style('stroke-width', '2px')
-        .style('opacity', 0)
-        .attr('d', d => {
-            const o = {x: source.x0 || source.x || 0, y: source.y0 || source.y || 0};
-            return createProfessionalLinkPath(o, o);
-        });
-    
-    const linkUpdate = linkEnter.merge(link);
-    
-    linkUpdate.transition()
-        .duration(500)
-        .style('opacity', 1)
-        .attr('d', d => createProfessionalLinkPath(d.parent, d));
-    
-    link.exit().transition()
-        .duration(500)
-        .style('opacity', 0)
-        .attr('d', d => {
-            const o = {x: source.x, y: source.y};
-            return createProfessionalLinkPath(o, o);
-        })
-        .remove();
-    
-    // Update nodes with PROFESSIONAL CARDS
-    const node = globalG.selectAll('.node')
-        .data(nodes, d => d.id);
-    
-    const nodeEnter = node.enter().append('g')
-        .attr('class', 'node professional-node')
-        .attr("transform", d => `translate(${source.x0 || source.x || 0},${source.y0 || source.y || 0})`)
-        .on('click', function(event, d) { 
-            toggleProfessional(d); 
-        })
-        .style('cursor', 'pointer');
-    
-    // Add PROFESSIONAL node background card
-    nodeEnter.append('rect')
-        .attr('class', 'professional-card')
-        .attr('width', 280)
-        .attr('height', 85)
-        .attr('x', -140)
-        .attr('y', -42.5)
-        .attr('rx', 12)
-        .attr('ry', 12)
-        .style('fill', '#ffffff')
-        .style('stroke', '#E5E7EB')
-        .style('stroke-width', '1px')
-        .style('filter', 'drop-shadow(0 4px 6px rgba(0, 0, 0, 0.1))')
-        .style('transition', 'all 0.3s ease');
-    
-    // Add hover effect
-    nodeEnter.selectAll('.professional-card')
-        .on('mouseenter', function() {
-            d3.select(this)
-                .style('filter', 'drop-shadow(0 8px 25px rgba(0, 0, 0, 0.15))')
-                .style('transform', 'translateY(-2px)');
-        })
-        .on('mouseleave', function() {
-            d3.select(this)
-                .style('filter', 'drop-shadow(0 4px 6px rgba(0, 0, 0, 0.1))')
-                .style('transform', 'translateY(0)');
-        });
-    
-    // Add PROFILE CIRCLE (left side)
-    nodeEnter.append('circle')
-        .attr('class', 'profile-circle')
-        .attr('cx', -90)
-        .attr('cy', 0)
-        .attr('r', 25)
-        .style('fill', d => {
-            const colors = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#06B6D4', '#F97316', '#84CC16'];
-            const name = d.data.name || '';
-            const index = name.length % colors.length;
-            return colors[index];
-        })
-        .style('stroke', '#ffffff')
-        .style('stroke-width', '3px');
-    
-    // Add PROFILE INITIALS
-    nodeEnter.append('text')
-        .attr('class', 'profile-initials')
-        .attr('x', -90)
-        .attr('y', 5)
-        .attr('text-anchor', 'middle')
-        .style('font-family', 'Inter, sans-serif')
-        .style('font-size', '14px')
-        .style('font-weight', '600')
-        .style('fill', '#ffffff')
-        .text(d => {
-            const name = d.data.name || '';
-            return name.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2);
-        });
-    
-    // Add EMPLOYEE NAME (primary text)
-    nodeEnter.append('text')
-        .attr('class', 'employee-name')
-        .attr('x', -45)
-        .attr('y', -12)
-        .attr('text-anchor', 'start')
-        .style('font-family', 'Inter, sans-serif')
-        .style('font-size', '16px')
-        .style('font-weight', '700')
-        .style('fill', '#1F2937')
-        .text(d => {
-            const name = d.data.name || '';
-            return name.length > 20 ? name.substring(0, 18) + '...' : name;
-        });
-    
-    // Add EMPLOYEE POSITION (secondary text)
-    nodeEnter.append('text')
-        .attr('class', 'employee-position')
-        .attr('x', -45)
-        .attr('y', 4)
-        .attr('text-anchor', 'start')
-        .style('font-family', 'Inter, sans-serif')
-        .style('font-size', '13px')
-        .style('font-weight', '500')
-        .style('fill', '#6B7280')
-        .text(d => {
-            const position = d.data.position || '';
-            return position.length > 24 ? position.substring(0, 22) + '...' : position;
-        });
-    
-    // Add LOCATION ONLY (no department to save space)
-    nodeEnter.append('text')
-        .attr('class', 'employee-location')
-        .attr('x', -45)
-        .attr('y', 20)
-        .attr('text-anchor', 'start')
-        .style('font-family', 'Inter, sans-serif')
-        .style('font-size', '11px')
-        .style('font-weight', '400')
-        .style('fill', '#9CA3AF')
-        .text(d => {
-            const location = d.data.location || d.data.country || '';
-            return location.length > 30 ? location.substring(0, 28) + '...' : location;
-        });
-    
-    // Add CONNECTION STATUS INDICATOR (top-right)
-    nodeEnter.append('circle')
-        .attr('class', 'status-indicator')
-        .attr('cx', 115)
-        .attr('cy', -25)
-        .attr('r', 6)
-        .style('fill', d => {
-            const relationship = d.data.relationship_with_qt || 'None';
-            switch(relationship.toLowerCase()) {
-                case 'direct': return '#10B981';
-                case 'indirect': return '#F59E0B';
-                default: return '#D1D5DB';
-            }
-        })
-        .style('stroke', '#ffffff')
-        .style('stroke-width', '2px');
-    
-    // Add REPORTS COUNTER (bottom-right)
-    const reportsGroup = nodeEnter.append('g')
-        .attr('class', 'reports-counter')
-        .style('display', d => {
-            const totalReports = (d._children ? d._children.length : 0) + (d.children ? d.children.length : 0);
-            return totalReports > 0 ? 'block' : 'none';
-        });
-    
-    reportsGroup.append('rect')
-        .attr('x', 95)
-        .attr('y', 18)
-        .attr('width', 32)
-        .attr('height', 16)
-        .attr('rx', 8)
-        .attr('ry', 8)
-        .style('fill', '#F3F4F6')
-        .style('stroke', '#E5E7EB')
-        .style('stroke-width', '1px');
-    
-    reportsGroup.append('text')
-        .attr('x', 111)
-        .attr('y', 28)
-        .attr('text-anchor', 'middle')
-        .style('font-family', 'Inter, sans-serif')
-        .style('font-size', '10px')
-        .style('font-weight', '600')
-        .style('fill', '#6B7280')
-        .text(d => {
-            const totalReports = (d._children ? d._children.length : 0) + (d.children ? d.children.length : 0);
-            return totalReports > 99 ? '99+' : totalReports.toString();
-        });
-    
-    // Add EXPAND/COLLAPSE BUTTON (bottom center)
-    const expandButton = nodeEnter.append('g')
-        .attr('class', 'expand-button')
-        .style('display', d => (d._children || (d.children && d.children.length > 0)) ? 'block' : 'none');
-    
-    expandButton.append('circle')
-        .attr('cx', 0)
-        .attr('cy', 60)
-        .attr('r', 10)
-        .style('fill', '#ffffff')
-        .style('stroke', '#0E3386')
-        .style('stroke-width', '2px');
-    
-    expandButton.append('text')
-        .attr('x', 0)
-        .attr('y', 65)
-        .attr('text-anchor', 'middle')
-        .style('font-family', 'Inter, sans-serif')
-        .style('font-size', '12px')
-        .style('font-weight', '700')
-        .style('fill', '#0E3386')
-        .text(d => (d.children && d.children.length > 0) ? '−' : '+');
-    
-    // Merge and update existing nodes
-    const nodeUpdate = nodeEnter.merge(node);
-    
-    nodeUpdate.transition()
-        .duration(500)
-        .attr("transform", d => `translate(${d.x},${d.y})`);
-    
-    // Update expand button
-    nodeUpdate.select('.expand-button text')
-        .text(d => (d.children && d.children.length > 0) ? '−' : '+');
-    
-    nodeUpdate.select('.expand-button')
-        .style('display', d => (d._children || (d.children && d.children.length > 0)) ? 'block' : 'none');
-    
-    // Update reports counter
-    nodeUpdate.select('.reports-counter')
-        .style('display', d => {
-            const totalReports = (d._children ? d._children.length : 0) + (d.children ? d.children.length : 0);
-            return totalReports > 0 ? 'block' : 'none';
-        });
-    
-    nodeUpdate.select('.reports-counter text')
-        .text(d => {
-            const totalReports = (d._children ? d._children.length : 0) + (d.children ? d.children.length : 0);
-            return totalReports > 99 ? '99+' : totalReports.toString();
-        });
-    
-    // Remove exiting nodes
-    node.exit().transition()
-        .duration(500)
-        .attr("transform", d => `translate(${source.x},${source.y})`)
-        .style('opacity', 0)
-        .remove();
-    
-    // Store positions for next time
-    nodes.forEach(d => {
-        d.x0 = d.x;
-        d.y0 = d.y;
-    });
-    
-    console.log('PROFESSIONAL chart update complete - no overlapping cards');
-}
-
-// Create professional connecting lines between parent and child nodes
-function createProfessionalLinkPath(parent, child) {
-    if (!parent || !child) return '';
-    
-    const midY = (parent.y + child.y) / 2;
-    
-    return `M${parent.x},${parent.y + 42.5}
-            L${parent.x},${midY}
-            L${child.x},${midY}
-            L${child.x},${child.y - 42.5}`;
-}
-
-// Toggle children on click - Professional version
-function toggleProfessional(d) {
-    console.log('Professional toggle called for:', d.data.name);
-    
-    if (d.children) {
-        d._children = d.children;
-        d.children = null;
-    } else {
-        d.children = d._children;
-        d._children = null;
-    }
-    updateProfessionalChart(d);
-}
-
-// BACKWARD COMPATIBILITY - Use complete chart version
-function updateChart(source) {
-    return updateCompleteChart();
-}
-
-function updateProfessionalChart(source) {
-    return updateCompleteChart();
-}
-
-function updateVerticalChart(source) {
-    return updateCompleteChart();
-}
-
-function updateFlatChart() {
-    return updateCompleteChart();
-}
-
-function toggle(d) {
-    return handleCompleteNodeClick(d);
-}
-
-function toggleProfessional(d) {
-    return handleCompleteNodeClick(d);
-}
-
-function toggleVertical(d) {
-    return handleCompleteNodeClick(d);
-}
-
-function handleFlatNodeClick(d) {
-    return handleCompleteNodeClick(d);
-}
-
-// Chart control functions - Updated for complete hierarchy
+// Chart control functions
 function expandAll() {
     console.log('Expand all - showing all immediate reports');
     // All immediate reports are already shown in the complete hierarchy
@@ -2168,7 +891,10 @@ function collapseAll() {
 }
 
 function resetChart() {
-    if (!globalTreeData) return;
+    if (!globalTreeData) {
+        console.log('No chart data to reset');
+        return;
+    }
     
     console.log('Resetting complete chart');
     renderOrgChart(globalTreeData);
@@ -2184,6 +910,8 @@ function highlightChampionConnections(champion) {
     // Add visual highlight border to champion cards
     if (globalG) {
         globalG.selectAll('.node').each(function(d) {
+            if (!d.data) return;
+            
             const representative = d.data.representative_from_qt;
             const personName = d.data.name;
             
@@ -2201,34 +929,10 @@ function highlightChampionConnections(champion) {
                     .style('filter', 'drop-shadow(0 0 15px rgba(255, 215, 0, 0.6))')
                     .style('animation', 'pulse-glow 2s infinite');
                 
-                // Add champion badge
-                const badgeGroup = d3.select(this).append('g')
-                    .attr('class', 'champion-badge');
-                
-                badgeGroup.append('circle')
-                    .attr('cx', -115)
-                    .attr('cy', -30)
-                    .attr('r', 12)
-                    .style('fill', '#FFD700')
-                    .style('stroke', '#ffffff')
-                    .style('stroke-width', '2px');
-                
-                badgeGroup.append('text')
-                    .attr('x', -115)
-                    .attr('y', -25)
-                    .attr('text-anchor', 'middle')
-                    .style('font-family', 'Inter, sans-serif')
-                    .style('font-size', '12px')
-                    .style('font-weight', '700')
-                    .style('fill', '#000000')
-                    .text('★');
-                
                 console.log('Highlighted node:', personName, 'connected to champion:', champion.name);
             }
         });
     }
-    
-    highlightChampionOnMap(champion);
     
     // Show notification
     showHighlightNotification(champion);
@@ -2302,9 +1006,6 @@ function clearHighlights() {
             .style('filter', 'drop-shadow(0 4px 6px rgba(0, 0, 0, 0.1))')
             .style('animation', null);
         
-        // Remove champion badges
-        globalG.selectAll('.champion-badge').remove();
-        
         // Clear link highlights
         globalG.selectAll('.link').classed('highlighted', false);
     }
@@ -2326,47 +1027,11 @@ function clearHighlights() {
     notifications.forEach(notification => notification.remove());
 }
 
-function highlightChampionOnMap(champion) {
-    if (!map) return;
-    
-    const championLocations = [];
-    champion.connections.forEach(connection => {
-        if (!championLocations.includes(connection.location)) {
-            championLocations.push(connection.location);
-        }
-    });
-    
-    map.eachLayer(function(layer) {
-        if (layer instanceof L.CircleMarker) {
-            const popup = layer.getPopup();
-            const element = layer.getElement();
-            
-            if (popup && element) {
-                const content = popup.getContent();
-                let isHighlighted = false;
-                
-                championLocations.forEach(location => {
-                    if (content.includes(location)) {
-                        isHighlighted = true;
-                    }
-                });
-                
-                if (isHighlighted) {
-                    element.classList.add('highlighted');
-                    element.classList.remove('dimmed');
-                } else {
-                    element.classList.add('dimmed');
-                    element.classList.remove('highlighted');
-                }
-            }
-        }
-    });
-}
-
 // Map rendering function
 function renderMap(mapData) {
     if (map) {
         map.remove();
+        map = null;
     }
     
     const mapContainer = document.getElementById('map');
@@ -2377,189 +1042,159 @@ function renderMap(mapData) {
     
     console.log('Rendering map with data:', mapData);
     
-    map = L.map('map', {
-        zoomControl: true,
-        scrollWheelZoom: true,
-        doubleClickZoom: true,
-        boxZoom: false,
-        keyboard: false,
-        dragging: true
-    }).setView([20, 0], 2);
-    
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '© OpenStreetMap contributors'
-    }).addTo(map);
-    
-    const locationCoords = {
-        'New York': [40.7128, -74.0060],
-        'San Francisco': [37.7749, -122.4194],
-        'Chicago': [41.8781, -87.6298],
-        'Austin': [30.2672, -97.7431],
-        'Seattle': [47.6062, -122.3321],
-        'Denver': [39.7392, -104.9903],
-        'London': [51.5074, -0.1278],
-        'Manchester': [53.4808, -2.2426],
-        'Berlin': [52.5200, 13.4050],
-        'Munich': [48.1351, 11.5820],
-        'Hamburg': [53.5511, 9.9937],
-        'Lisbon': [38.7223, -9.1393],
-        'Porto': [41.1579, -8.6291],
-        'Braga': [41.5518, -8.4229],
-        'Mumbai': [19.0760, 72.8777],
-        'Bangalore': [12.9716, 77.5946],
-        'Delhi': [28.7041, 77.1025],
-        'Chennai': [13.0827, 80.2707],
-        'Pune': [18.5204, 73.8567]
-    };
-    
-    mapData.forEach(location => {
-        const coords = locationCoords[location.location];
+    try {
+        map = L.map('map', {
+            zoomControl: true,
+            scrollWheelZoom: true,
+            doubleClickZoom: true,
+            boxZoom: false,
+            keyboard: false,
+            dragging: true
+        }).setView([20, 0], 2);
         
-        if (!coords) {
-            console.warn('No coordinates found for location:', location.location);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors'
+        }).addTo(map);
+        
+        const locationCoords = {
+            'New York': [40.7128, -74.0060],
+            'San Francisco': [37.7749, -122.4194],
+            'Chicago': [41.8781, -87.6298],
+            'Austin': [30.2672, -97.7431],
+            'Seattle': [47.6062, -122.3321],
+            'Denver': [39.7392, -104.9903],
+            'London': [51.5074, -0.1278],
+            'Manchester': [53.4808, -2.2426],
+            'Berlin': [52.5200, 13.4050],
+            'Munich': [48.1351, 11.5820],
+            'Hamburg': [53.5511, 9.9937],
+            'Lisbon': [38.7223, -9.1393],
+            'Porto': [41.1579, -8.6291],
+            'Braga': [41.5518, -8.4229],
+            'Mumbai': [19.0760, 72.8777],
+            'Bangalore': [12.9716, 77.5946],
+            'Delhi': [28.7041, 77.1025],
+            'Chennai': [13.0827, 80.2707],
+            'Pune': [18.5204, 73.8567]
+        };
+        
+        if (!mapData || !Array.isArray(mapData)) {
+            console.warn('Invalid map data provided');
             return;
         }
         
-        const connectionCounts = {
-            direct: 0,
-            indirect: 0,
-            none: 0
-        };
-        
-        location.people.forEach(person => {
-            const relationship = person.relationship_with_qt || 'None';
-            if (relationship.toLowerCase() === 'direct') {
-                connectionCounts.direct++;
-            } else if (relationship.toLowerCase() === 'indirect') {
-                connectionCounts.indirect++;
+        mapData.forEach(location => {
+            const coords = locationCoords[location.location];
+            
+            if (!coords) {
+                console.warn('No coordinates found for location:', location.location);
+                return;
+            }
+            
+            const connectionCounts = {
+                direct: 0,
+                indirect: 0,
+                none: 0
+            };
+            
+            if (location.people && Array.isArray(location.people)) {
+                location.people.forEach(person => {
+                    const relationship = person.relationship_with_qt || 'None';
+                    if (relationship.toLowerCase() === 'direct') {
+                        connectionCounts.direct++;
+                    } else if (relationship.toLowerCase() === 'indirect') {
+                        connectionCounts.indirect++;
+                    } else {
+                        connectionCounts.none++;
+                    }
+                });
+            }
+            
+            let circleColor, strokeColor;
+            if (connectionCounts.direct > 0) {
+                circleColor = '#00C853';
+                strokeColor = '#00A847';
+            } else if (connectionCounts.indirect > 0) {
+                circleColor = '#FF9800';
+                strokeColor = '#E68900';
             } else {
-                connectionCounts.none++;
+                circleColor = '#757575';
+                strokeColor = '#616161';
             }
-        });
-        
-        let circleColor, strokeColor;
-        if (connectionCounts.direct > 0) {
-            circleColor = '#00C853';
-            strokeColor = '#00A847';
-        } else if (connectionCounts.indirect > 0) {
-            circleColor = '#FF9800';
-            strokeColor = '#E68900';
-        } else {
-            circleColor = '#757575';
-            strokeColor = '#616161';
-        }
-        
-        const radius = Math.max(8, Math.min(25, location.count * 3));
-        
-        const circleMarker = L.circleMarker(coords, {
-            radius: radius,
-            fillColor: circleColor,
-            color: strokeColor,
-            weight: 3,
-            opacity: 1,
-            fillOpacity: 0.8
-        }).addTo(map);
-        
-        const popupContent = `
-            <div style="font-family: 'Inter', sans-serif; min-width: 250px;">
-                <h3 style="margin: 0 0 12px 0; color: #333; font-size: 1.1rem;">📍 ${location.location}</h3>
-                <p style="margin: 0 0 10px 0; font-weight: 600; color: #555;"><strong>Total Employees:</strong> ${location.count}</p>
-                
-                ${connectionCounts.direct > 0 ? 
-                    `<div style="background: #E8F5E8; padding: 8px; border-radius: 6px; margin-bottom: 8px; border-left: 4px solid #00C853;">
-                        <strong style="color: #00A847;">🎯 Direct Connections: ${connectionCounts.direct}</strong>
-                        <br><small style="color: #007233;">High priority sales opportunities!</small>
-                    </div>` : ''}
-                
-                ${connectionCounts.indirect > 0 ? 
-                    `<div style="background: #FFF8E1; padding: 8px; border-radius: 6px; margin-bottom: 8px; border-left: 4px solid #FF9800;">
-                        <strong style="color: #E68900;">🤝 Indirect Connections: ${connectionCounts.indirect}</strong>
-                        <br><small style="color: #CC7A00;">Good networking opportunities!</small>
-                    </div>` : ''}
-                
-                ${connectionCounts.none > 0 ? 
-                    `<div style="background: #F5F5F5; padding: 8px; border-radius: 6px; margin-bottom: 12px; border-left: 4px solid #757575;">
-                        <strong style="color: #666;">❓ No Known Connections: ${connectionCounts.none}</strong>
-                    </div>` : ''}
-                
-                <div style="max-height: 150px; overflow-y: auto; border-top: 1px solid #eee; padding-top: 8px;">
-                    <strong style="color: #333; font-size: 0.9rem;">Team Members:</strong>
-                    <ul style="margin: 6px 0 0 0; padding-left: 16px; font-size: 0.85rem;">
-                        ${location.people.map(person => {
-                            const relationship = person.relationship_with_qt || 'None';
-                            let connectionIcon = '';
-                            let textColor = '#333';
-                            
-                            if (relationship.toLowerCase() === 'direct') {
-                                connectionIcon = '🎯 Direct';
-                                textColor = '#00A847';
-                            } else if (relationship.toLowerCase() === 'indirect') {
-                                connectionIcon = '🤝 Indirect';
-                                textColor = '#E68900';
-                            } else {
-                                connectionIcon = '❓ None';
-                                textColor = '#666';
-                            }
-                            
-                            return `<li style="margin-bottom: 4px; color: ${textColor};">
-                                ${connectionIcon} - <strong>${person.name}</strong><br>
-                                <small style="color: #666;">${person.position}</small>
-                                ${person.representative_from_qt && person.representative_from_qt !== 'No' && person.representative_from_qt !== '' ? 
-                                    `<br><small style="color: #4A90E2;">Via: ${person.representative_from_qt}</small>` : ''}
-                            </li>`;
-                        }).join('')}
-                    </ul>
+            
+            const radius = Math.max(8, Math.min(25, location.count * 3));
+            
+            const circleMarker = L.circleMarker(coords, {
+                radius: radius,
+                fillColor: circleColor,
+                color: strokeColor,
+                weight: 3,
+                opacity: 1,
+                fillOpacity: 0.8
+            }).addTo(map);
+            
+            const popupContent = `
+                <div style="font-family: 'Inter', sans-serif; min-width: 250px;">
+                    <h3 style="margin: 0 0 12px 0; color: #333; font-size: 1.1rem;">${location.location}</h3>
+                    <p style="margin: 0 0 10px 0; font-weight: 600; color: #555;"><strong>Total Employees:</strong> ${location.count}</p>
+                    
+                    ${connectionCounts.direct > 0 ? 
+                        `<div style="background: #E8F5E8; padding: 8px; border-radius: 6px; margin-bottom: 8px; border-left: 4px solid #00C853;">
+                            <strong style="color: #00A847;">Direct Connections: ${connectionCounts.direct}</strong>
+                        </div>` : ''}
+                    
+                    ${connectionCounts.indirect > 0 ? 
+                        `<div style="background: #FFF8E1; padding: 8px; border-radius: 6px; margin-bottom: 8px; border-left: 4px solid #FF9800;">
+                            <strong style="color: #E68900;">Indirect Connections: ${connectionCounts.indirect}</strong>
+                        </div>` : ''}
+                    
+                    ${connectionCounts.none > 0 ? 
+                        `<div style="background: #F5F5F5; padding: 8px; border-radius: 6px; margin-bottom: 12px; border-left: 4px solid #757575;">
+                            <strong style="color: #666;">No Known Connections: ${connectionCounts.none}</strong>
+                        </div>` : ''}
                 </div>
-            </div>
-        `;
-        
-        circleMarker.bindPopup(popupContent);
-    });
-    
-    // Fit map to show all markers
-    if (mapData.length > 0) {
-        const group = new L.featureGroup();
-        map.eachLayer(layer => {
-            if (layer instanceof L.CircleMarker) {
-                group.addLayer(layer);
-            }
+            `;
+            
+            circleMarker.bindPopup(popupContent);
         });
         
-        if (group.getLayers().length > 0) {
-            setTimeout(() => {
-                map.fitBounds(group.getBounds().pad(0.1));
-            }, 100);
+        // Fit map to show all markers
+        if (mapData.length > 0) {
+            const group = new L.featureGroup();
+            map.eachLayer(layer => {
+                if (layer instanceof L.CircleMarker) {
+                    group.addLayer(layer);
+                }
+            });
+            
+            if (group.getLayers().length > 0) {
+                setTimeout(() => {
+                    map.fitBounds(group.getBounds().pad(0.1));
+                }, 100);
+            }
         }
+        
+        console.log('Map rendered successfully');
+        
+    } catch (error) {
+        console.error('Error rendering map:', error);
     }
-}
-
-// Additional utility functions for debugging
-function debugOrgChart() {
-    console.log('=== PROFESSIONAL CHART DEBUG INFO ===');
-    console.log('Current person:', currentPerson);
-    console.log('Global tree data:', globalTreeData);
-    console.log('Global root:', globalRoot);
-    if (globalRoot) {
-        console.log('Total nodes in tree:', globalRoot.descendants().length);
-        console.log('Visible nodes:', globalRoot.descendants().filter(d => d.parent === null || (d.parent.children && d.parent.children.includes(d))).length);
-        console.log('Root children:', globalRoot.children ? globalRoot.children.length : 0);
-        console.log('Root _children:', globalRoot._children ? globalRoot._children.length : 0);
-    }
-    console.log('Chart type: PROFESSIONAL CARDS');
-    console.log('=====================================');
 }
 
 // Error handling wrapper for API calls
 async function safeApiCall(url, errorMessage) {
     try {
+        console.log('Making API call to:', url);
         const response = await fetch(url);
         if (!response.ok) {
             throw new Error(`HTTP ${response.status}: ${response.statusText}`);
         }
-        return await response.json();
+        const data = await response.json();
+        console.log('API call successful:', url);
+        return data;
     } catch (error) {
         console.error(`${errorMessage}:`, error);
-        alert(`${errorMessage}. Please check if the Flask server is running and try again.`);
+        alert(`${errorMessage}. Error: ${error.message}`);
         throw error;
     }
 }
@@ -2568,15 +1203,25 @@ async function safeApiCall(url, errorMessage) {
 window.addEventListener('resize', () => {
     if (globalTreeData && currentPerson) {
         setTimeout(() => {
+            console.log('Window resized, re-rendering chart');
             renderOrgChart(globalTreeData);
         }, 100);
     }
 });
 
 // Expose functions to window for console access and debugging
-window.debugOrgChart = debugOrgChart;
+window.debugOrgChart = function() {
+    console.log('=== DEBUG INFO ===');
+    console.log('Current person:', currentPerson);
+    console.log('Global tree data:', globalTreeData);
+    console.log('Global root:', globalRoot);
+    console.log('All employees loaded:', allEmployees.length);
+    console.log('==================');
+};
+
 window.expandAll = expandAll;
 window.collapseAll = collapseAll;
 window.resetChart = resetChart;
+window.clearHighlights = clearHighlights;
 
-console.log('PROFESSIONAL JavaScript file loaded successfully - Chart will show large detailed cards with profile circles and autocomplete search');
+console.log('Updated JavaScript file loaded successfully - Enhanced error handling and debugging');

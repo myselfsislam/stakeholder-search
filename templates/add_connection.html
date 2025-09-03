@@ -268,9 +268,9 @@
                     
                     <div class="form-row">
                         <div class="form-group">
-                            <label class="form-label" for="company">Company</label>
-                            <input type="text" id="company" name="company" class="form-input" 
-                                   placeholder="Company name">
+                            <label class="form-label" for="email">Email Address</label>
+                            <input type="email" id="email" name="email" class="form-input" 
+                                   placeholder="ldap@google.com">
                         </div>
                         
                         <div class="form-group">
@@ -281,10 +281,18 @@
                     </div>
                     
                     <div class="form-row">
-                        <div class="form-group full-width">
+                        <div class="form-group">
+                            <label class="form-label" for="connection-champion">Connection Champion *</label>
+                            <select id="connection-champion" name="connectionChampion" class="form-select" required>
+                                <option value="">Select a connection champion</option>
+                                <!-- Options will be populated dynamically -->
+                            </select>
+                        </div>
+                        
+                        <div class="form-group">
                             <label class="form-label" for="moma-url">MOMA URL</label>
                             <input type="url" id="moma-url" name="momaUrl" class="form-input" 
-                                   placeholder="https://moma.company.com/profile/...">
+                                   placeholder="https://moma.corp.google.com/person/">
                         </div>
                     </div>
                     
@@ -322,14 +330,6 @@
                         </div>
                     </div>
                     
-                    <div class="form-row">
-                        <div class="form-group full-width">
-                            <label class="form-label" for="notes">Additional Notes</label>
-                            <textarea id="notes" name="notes" class="form-textarea" 
-                                      placeholder="Any additional context about this connection or potential business opportunities..."></textarea>
-                        </div>
-                    </div>
-                    
                     <div class="form-actions">
                         <a href="/" class="btn btn-secondary">Cancel</a>
                         <button type="submit" class="btn btn-primary">Add Connection</button>
@@ -340,6 +340,75 @@
     </div>
 
     <script>
+        // Connection champions data - will be loaded from API
+        let connectionChampions = [];
+        
+        // Load page data when DOM is ready
+        document.addEventListener('DOMContentLoaded', function() {
+            loadConnectionChampions();
+        });
+        
+        // Load connection champions from the API
+        async function loadConnectionChampions() {
+            try {
+                console.log('Loading connection champions...');
+                
+                // Get all employees and filter for representatives
+                const response = await fetch('/api/search?q=');
+                if (!response.ok) {
+                    throw new Error('Failed to load employees');
+                }
+                
+                const employees = await response.json();
+                
+                // Extract unique representatives (connection champions)
+                const championSet = new Set();
+                employees.forEach(emp => {
+                    const rep = emp.representative_from_qt;
+                    if (rep && rep !== 'No' && rep !== '' && rep !== 'N/A') {
+                        championSet.add(rep);
+                    }
+                });
+                
+                connectionChampions = Array.from(championSet).sort();
+                console.log('Loaded connection champions:', connectionChampions);
+                
+                // Populate the dropdown
+                populateChampionsDropdown();
+                
+            } catch (error) {
+                console.error('Error loading connection champions:', error);
+                // Add fallback champions if API fails
+                connectionChampions = ['Mayank', 'Lihi', 'Dennis', 'Mike', 'Matt'];
+                populateChampionsDropdown();
+            }
+        }
+        
+        // Populate the connection champions dropdown
+        function populateChampionsDropdown() {
+            const dropdown = document.getElementById('connection-champion');
+            if (!dropdown) {
+                console.error('Connection champion dropdown not found');
+                return;
+            }
+            
+            // Clear existing options (except the first placeholder)
+            const placeholder = dropdown.options[0];
+            dropdown.innerHTML = '';
+            dropdown.appendChild(placeholder);
+            
+            // Add champion options
+            connectionChampions.forEach(champion => {
+                const option = document.createElement('option');
+                option.value = champion;
+                option.textContent = champion;
+                dropdown.appendChild(option);
+            });
+            
+            console.log('Populated dropdown with', connectionChampions.length, 'champions');
+        }
+        
+        // Form submission handler
         document.getElementById('connection-form').addEventListener('submit', function(e) {
             e.preventDefault();
             
@@ -348,19 +417,27 @@
             const connectionData = {
                 name: formData.get('connectionName'),
                 designation: formData.get('designation'),
-                company: formData.get('company'),
+                email: formData.get('email'),
                 department: formData.get('department'),
+                connectionChampion: formData.get('connectionChampion'),
                 momaUrl: formData.get('momaUrl'),
                 degreeOfConnection: formData.get('degreeOfConnection'),
-                notes: formData.get('notes'),
                 dateAdded: new Date().toISOString()
             };
             
             // Validate required fields
-            if (!connectionData.name || !connectionData.designation || !connectionData.degreeOfConnection) {
+            if (!connectionData.name || !connectionData.designation || !connectionData.degreeOfConnection || !connectionData.connectionChampion) {
                 showError('Please fill in all required fields.');
                 return;
             }
+            
+            // Validate email format if provided
+            if (connectionData.email && !isValidEmail(connectionData.email)) {
+                showError('Please enter a valid email address.');
+                return;
+            }
+            
+            console.log('Submitting connection data:', connectionData);
             
             // Send to API
             fetch('/api/add-connection', {
@@ -384,6 +461,12 @@
                 showError('Network error. Please try again.');
             });
         });
+        
+        // Email validation helper
+        function isValidEmail(email) {
+            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+            return emailRegex.test(email);
+        }
         
         function showSuccess() {
             const successMsg = document.getElementById('success-message');
