@@ -1,22 +1,207 @@
-from flask import Flask, render_template, request, jsonify
+# Install required packages:
+# pip install flask pandas openpyxl requests Office365-REST-Python-Client werkzeug
+
+from flask import Flask, render_template, request, jsonify, send_file
 import pandas as pd
 import json
 from collections import defaultdict
 import os
 import logging
 from datetime import datetime
+import requests
+from werkzeug.utils import secure_filename
+import openpyxl
+from openpyxl import Workbook
+import io
+
+# Office365/SharePoint integration (optional)
+try:
+    from office365.runtime.auth.authentication_context import AuthenticationContext
+    from office365.sharepoint.client_context import ClientContext
+    from office365.sharepoint.files.file import File
+    SHAREPOINT_AVAILABLE = True
+except ImportError:
+    SHAREPOINT_AVAILABLE = False
+    print("Office365 library not installed. SharePoint integration disabled.")
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 
-# Sample data structure - comprehensive test data
+# Configuration
+UPLOAD_FOLDER = 'uploads'
+ALLOWED_EXTENSIONS = {'xlsx', 'xls', 'csv'}
+
+# SharePoint Configuration (set these if using SharePoint)
+SHAREPOINT_URL = None  # e.g., "https://yourcompany.sharepoint.com/sites/yoursite"
+SHAREPOINT_USERNAME = None
+SHAREPOINT_PASSWORD = None
+SHAREPOINT_FOLDER = "Shared Documents/OrgData"  # Folder path in SharePoint
+
+# Google Apps Script URL (for connections)
+GOOGLE_SCRIPT_URL = None
+
+# Create upload folder if it doesn't exist
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+# Global variables
+company_data = []
+new_connections = []
+excel_file_path = None
+
+def allowed_file(filename):
+    """Check if file extension is allowed"""
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+def load_data_from_excel(file_path=None):
+    """Load organizational data from Excel file"""
+    global company_data, excel_file_path
+    
+    if file_path:
+        excel_file_path = file_path
+    elif excel_file_path and os.path.exists(excel_file_path):
+        file_path = excel_file_path
+    else:
+        # Fallback to sample data if no Excel file
+        logger.info("No Excel file found, using sample data")
+        company_data = load_sample_data()
+        return
+    
+    try:
+        logger.info(f"Loading data from Excel file: {file_path}")
+        
+        # Read Excel file
+        df = pd.read_excel(file_path)
+        
+        # Expected columns mapping
+        column_mapping = {
+            'name': ['Name', 'Employee Name', 'Full Name'],
+            'position': ['Position', 'Job Title', 'Title', 'Role'],
+            'department': ['Department', 'Dept', 'Division'],
+            'country': ['Country', 'Nation'],
+            'location_input': ['Location', 'City', 'Office'],
+            'manager_name': ['Manager', 'Manager Name', 'Reports To'],
+            'relationship_with_qt': ['Relationship', 'Connection Type', 'QT Relationship'],
+            'representative_from_qt': ['Representative', 'Rep', 'QT Rep'],
+            'ldap': ['LDAP', 'Username', 'Login'],
+            'moma_url': ['MOMA URL', 'Profile URL', 'MOMA Link'],
+            'manager_email': ['Manager Email', 'Manager Mail']
+        }
+        
+        # Normalize column names
+        normalized_data = []
+        for _, row in df.iterrows():
+            employee = {}
+            
+            # Map columns to standard names
+            for standard_name, possible_names in column_mapping.items():
+                value = None
+                for possible_name in possible_names:
+                    if possible_name in df.columns:
+                        value = row[possible_name]
+                        break
+                
+                # Handle NaN values
+                if pd.isna(value):
+                    value = '' if standard_name in ['manager_name', 'manager_email', 'ldap', 'moma_url'] else 'Unknown'
+                
+                employee[standard_name] = str(value).strip() if value else ''
+            
+            # Add additional fields
+            employee.update({
+                'moma_photo_url': f"https://example.com/photos/{employee.get('ldap', 'default')}.jpg",
+                'manager_name_input': employee.get('manager_name', ''),
+                'time_of_run': datetime.now().strftime('%Y-%m-%d'),
+            })
+            
+            normalized_data.append(employee)
+        
+        company_data = normalized_data
+        logger.info(f"Successfully loaded {len(company_data)} employees from Excel")
+        
+    except Exception as e:
+        logger.error(f"Error loading Excel file: {str(e)}")
+        # Fallback to sample data
+        company_data = load_sample_data()
+
+def save_data_to_excel(file_path=None):
+    """Save current organizational data to Excel file"""
+    global excel_file_path
+    
+    if not file_path:
+        file_path = excel_file_path or os.path.join(UPLOAD_FOLDER, 'organization_data.xlsx')
+    
+    try:
+        # Convert data to DataFrame
+        df = pd.DataFrame(company_data)
+        
+        # Reorder columns for better readability
+        column_order = [
+            'name', 'position', 'department', 'country', 'location_input',
+            'manager_name', 'relationship_with_qt', 'representative_from_qt',
+            'ldap', 'moma_url', 'manager_email'
+        ]
+        
+        # Ensure all columns exist
+        for col in column_order:
+            if col not in df.columns:
+                df[col] = ''
+        
+        df = df[column_order]
+        
+        # Rename columns for Excel
+        df.columns = [
+            'Name', 'Position', 'Department', 'Country', 'Location',
+            'Manager Name', 'QT Relationship', 'QT Representative',
+            'LDAP', 'MOMA URL', 'Manager Email'
+        ]
+        
+        # Save to Excel
+        df.to_excel(file_path, index=False, engine='openpyxl')
+        logger.info(f"Data saved to Excel file: {file_path}")
+        
+        # Upload to SharePoint if configured
+        if SHAREPOINT_AVAILABLE and SHAREPOINT_URL:
+            upload_to_sharepoint(file_path)
+        
+        return file_path
+        
+    except Exception as e:
+        logger.error(f"Error saving to Excel: {str(e)}")
+        return None
+
+def upload_to_sharepoint(file_path):
+    """Upload Excel file to SharePoint"""
+    if not (SHAREPOINT_URL and SHAREPOINT_USERNAME and SHAREPOINT_PASSWORD):
+        logger.info("SharePoint credentials not configured")
+        return False
+    
+    try:
+        # Authenticate with SharePoint
+        auth_context = AuthenticationContext(SHAREPOINT_URL)
+        auth_context.acquire_token_for_user(SHAREPOINT_USERNAME, SHAREPOINT_PASSWORD)
+        
+        ctx = ClientContext(SHAREPOINT_URL, auth_context)
+        
+        # Upload file
+        with open(file_path, 'rb') as file_content:
+            file_name = os.path.basename(file_path)
+            target_url = f"{SHAREPOINT_FOLDER}/{file_name}"
+            
+            File.save_binary(ctx, target_url, file_content.read())
+            logger.info(f"File uploaded to SharePoint: {target_url}")
+            return True
+            
+    except Exception as e:
+        logger.error(f"Error uploading to SharePoint: {str(e)}")
+        return False
+
 def load_sample_data():
-    """Load comprehensive test data with diverse global representation and realistic representative connections"""
+    """Fallback sample data if no Excel file is available"""
     return [
-        # Executive Level - USA
         {
             'name': 'Sarah Williams',
             'position': 'CEO',
@@ -33,8 +218,6 @@ def load_sample_data():
             'relationship_with_qt': 'Direct',
             'representative_from_qt': 'Mayank'
         },
-        
-        # C-Suite - Different Countries
         {
             'name': 'James Thompson',
             'position': 'CTO',
@@ -51,421 +234,14 @@ def load_sample_data():
             'relationship_with_qt': 'Direct',
             'representative_from_qt': 'Mayank'
         },
-        {
-            'name': 'Maria Santos',
-            'position': 'CFO',
-            'department': 'Finance',
-            'country': 'Portugal',
-            'ldap': 'msantos',
-            'moma_url': 'https://example.com/msantos',
-            'manager_name': 'Sarah Williams',
-            'manager_email': 'swilliams@company.com',
-            'moma_photo_url': 'https://example.com/photos/msantos.jpg',
-            'manager_name_input': 'Sarah Williams',
-            'location_input': 'Lisbon',
-            'time_of_run': '2024-01-01',
-            'relationship_with_qt': 'Direct',
-            'representative_from_qt': 'Mayank'
-        },
-        {
-            'name': 'Klaus Mueller',
-            'position': 'VP Operations',
-            'department': 'Operations',
-            'country': 'Germany',
-            'ldap': 'kmueller',
-            'moma_url': 'https://example.com/kmueller',
-            'manager_name': 'Sarah Williams',
-            'manager_email': 'swilliams@company.com',
-            'moma_photo_url': 'https://example.com/photos/kmueller.jpg',
-            'manager_name_input': 'Sarah Williams',
-            'location_input': 'Berlin',
-            'time_of_run': '2024-01-01',
-            'relationship_with_qt': 'Direct',
-            'representative_from_qt': 'Lihi'
-        },
-        {
-            'name': 'Priya Sharma',
-            'position': 'VP Marketing',
-            'department': 'Marketing',
-            'country': 'India',
-            'ldap': 'psharma',
-            'moma_url': 'https://example.com/psharma',
-            'manager_name': 'Sarah Williams',
-            'manager_email': 'swilliams@company.com',
-            'moma_photo_url': 'https://example.com/photos/psharma.jpg',
-            'manager_name_input': 'Sarah Williams',
-            'location_input': 'Mumbai',
-            'time_of_run': '2024-01-01',
-            'relationship_with_qt': 'Direct',
-            'representative_from_qt': 'Lihi'
-        },
-        # Engineering Team - UK
-        {
-            'name': 'Oliver Davis',
-            'position': 'Engineering Director',
-            'department': 'Engineering',
-            'country': 'UK',
-            'ldap': 'odavis',
-            'moma_url': 'https://example.com/odavis',
-            'manager_name': 'James Thompson',
-            'manager_email': 'jthompson@company.com',
-            'moma_photo_url': 'https://example.com/photos/odavis.jpg',
-            'manager_name_input': 'James Thompson',
-            'location_input': 'London',
-            'time_of_run': '2024-01-01',
-            'relationship_with_qt': 'Indirect',
-            'representative_from_qt': 'Lihi'
-        },
-        {
-            'name': 'Emma Wilson',
-            'position': 'Senior Software Engineer',
-            'department': 'Engineering',
-            'country': 'UK',
-            'ldap': 'ewilson',
-            'moma_url': 'https://example.com/ewilson',
-            'manager_name': 'Oliver Davis',
-            'manager_email': 'odavis@company.com',
-            'moma_photo_url': 'https://example.com/photos/ewilson.jpg',
-            'manager_name_input': 'Oliver Davis',
-            'location_input': 'London',
-            'time_of_run': '2024-01-01',
-            'relationship_with_qt': 'Indirect',
-            'representative_from_qt': 'Mike'
-        },
-        {
-            'name': 'Liam Brown',
-            'position': 'DevOps Engineer',
-            'department': 'Engineering',
-            'country': 'UK',
-            'ldap': 'lbrown',
-            'moma_url': 'https://example.com/lbrown',
-            'manager_name': 'Oliver Davis',
-            'manager_email': 'odavis@company.com',
-            'moma_photo_url': 'https://example.com/photos/lbrown.jpg',
-            'manager_name_input': 'Oliver Davis',
-            'location_input': 'Manchester',
-            'time_of_run': '2024-01-01',
-            'relationship_with_qt': 'None',
-            'representative_from_qt': 'No'
-        },
-
-        # Engineering Team - Germany
-        {
-            'name': 'Hans Weber',
-            'position': 'Senior Backend Engineer',
-            'department': 'Engineering',
-            'country': 'Germany',
-            'ldap': 'hweber',
-            'moma_url': 'https://example.com/hweber',
-            'manager_name': 'James Thompson',
-            'manager_email': 'jthompson@company.com',
-            'moma_photo_url': 'https://example.com/photos/hweber.jpg',
-            'manager_name_input': 'James Thompson',
-            'location_input': 'Berlin',
-            'time_of_run': '2024-01-01',
-            'relationship_with_qt': 'Indirect',
-            'representative_from_qt': 'Dennis'
-        },
-        {
-            'name': 'Anna Schmidt',
-            'position': 'Frontend Developer',
-            'department': 'Engineering',
-            'country': 'Germany',
-            'ldap': 'aschmidt',
-            'moma_url': 'https://example.com/aschmidt',
-            'manager_name': 'Hans Weber',
-            'manager_email': 'hweber@company.com',
-            'moma_photo_url': 'https://example.com/photos/aschmidt.jpg',
-            'manager_name_input': 'Hans Weber',
-            'location_input': 'Munich',
-            'time_of_run': '2024-01-01',
-            'relationship_with_qt': 'Indirect',
-            'representative_from_qt': 'Dennis'
-        },
-        # Finance Team - Portugal
-        {
-            'name': 'João Silva',
-            'position': 'Finance Director',
-            'department': 'Finance',
-            'country': 'Portugal',
-            'ldap': 'jsilva',
-            'moma_url': 'https://example.com/jsilva',
-            'manager_name': 'Maria Santos',
-            'manager_email': 'msantos@company.com',
-            'moma_photo_url': 'https://example.com/photos/jsilva.jpg',
-            'manager_name_input': 'Maria Santos',
-            'location_input': 'Lisbon',
-            'time_of_run': '2024-01-01',
-            'relationship_with_qt': 'Indirect',
-            'representative_from_qt': 'Matt'
-        },
-        {
-            'name': 'Catarina Costa',
-            'position': 'Financial Analyst',
-            'department': 'Finance',
-            'country': 'Portugal',
-            'ldap': 'ccosta',
-            'moma_url': 'https://example.com/ccosta',
-            'manager_name': 'João Silva',
-            'manager_email': 'jsilva@company.com',
-            'moma_photo_url': 'https://example.com/photos/ccosta.jpg',
-            'manager_name_input': 'João Silva',
-            'location_input': 'Porto',
-            'time_of_run': '2024-01-01',
-            'relationship_with_qt': 'None',
-            'representative_from_qt': 'No'
-        },
-
-        # Marketing Team - India
-        {
-            'name': 'Rahul Patel',
-            'position': 'Marketing Director',
-            'department': 'Marketing',
-            'country': 'India',
-            'ldap': 'rpatel',
-            'moma_url': 'https://example.com/rpatel',
-            'manager_name': 'Priya Sharma',
-            'manager_email': 'psharma@company.com',
-            'moma_photo_url': 'https://example.com/photos/rpatel.jpg',
-            'manager_name_input': 'Priya Sharma',
-            'location_input': 'Mumbai',
-            'time_of_run': '2024-01-01',
-            'relationship_with_qt': 'Indirect',
-            'representative_from_qt': 'Mike'
-        },
-        {
-            'name': 'Deepika Singh',
-            'position': 'Digital Marketing Manager',
-            'department': 'Marketing',
-            'country': 'India',
-            'ldap': 'dsingh',
-            'moma_url': 'https://example.com/dsingh',
-            'manager_name': 'Rahul Patel',
-            'manager_email': 'rpatel@company.com',
-            'moma_photo_url': 'https://example.com/photos/dsingh.jpg',
-            'manager_name_input': 'Rahul Patel',
-            'location_input': 'Bangalore',
-            'time_of_run': '2024-01-01',
-            'relationship_with_qt': 'Direct',
-            'representative_from_qt': 'Dennis'
-        },
-        {
-            'name': 'Arjun Kumar',
-            'position': 'Content Marketing Specialist',
-            'department': 'Marketing',
-            'country': 'India',
-            'ldap': 'akumar',
-            'moma_url': 'https://example.com/akumar',
-            'manager_name': 'Deepika Singh',
-            'manager_email': 'dsingh@company.com',
-            'moma_photo_url': 'https://example.com/photos/akumar.jpg',
-            'manager_name_input': 'Deepika Singh',
-            'location_input': 'Delhi',
-            'time_of_run': '2024-01-01',
-            'relationship_with_qt': 'None',
-            'representative_from_qt': 'No'
-        },
-
-        # Operations Team - Germany
-        {
-            'name': 'Stefan Fischer',
-            'position': 'Operations Manager',
-            'department': 'Operations',
-            'country': 'Germany',
-            'ldap': 'sfischer',
-            'moma_url': 'https://example.com/sfischer',
-            'manager_name': 'Klaus Mueller',
-            'manager_email': 'kmueller@company.com',
-            'moma_photo_url': 'https://example.com/photos/sfischer.jpg',
-            'manager_name_input': 'Klaus Mueller',
-            'location_input': 'Berlin',
-            'time_of_run': '2024-01-01',
-            'relationship_with_qt': 'Indirect',
-            'representative_from_qt': 'Lihi'
-        },
-        {
-            'name': 'Petra Hoffman',
-            'position': 'Supply Chain Coordinator',
-            'department': 'Operations',
-            'country': 'Germany',
-            'ldap': 'phoffman',
-            'moma_url': 'https://example.com/phoffman',
-            'manager_name': 'Stefan Fischer',
-            'manager_email': 'sfischer@company.com',
-            'moma_photo_url': 'https://example.com/photos/phoffman.jpg',
-            'manager_name_input': 'Stefan Fischer',
-            'location_input': 'Hamburg',
-            'time_of_run': '2024-01-01',
-            'relationship_with_qt': 'None',
-            'representative_from_qt': 'No'
-        },
-        # Sales Team - USA
-        {
-            'name': 'Michael Johnson',
-            'position': 'VP Sales',
-            'department': 'Sales',
-            'country': 'USA',
-            'ldap': 'mjohnson',
-            'moma_url': 'https://example.com/mjohnson',
-            'manager_name': 'Sarah Williams',
-            'manager_email': 'swilliams@company.com',
-            'moma_photo_url': 'https://example.com/photos/mjohnson.jpg',
-            'manager_name_input': 'Sarah Williams',
-            'location_input': 'San Francisco',
-            'time_of_run': '2024-01-01',
-            'relationship_with_qt': 'Direct',
-            'representative_from_qt': 'Matt'
-        },
-        {
-            'name': 'Jennifer Garcia',
-            'position': 'Sales Director',
-            'department': 'Sales',
-            'country': 'USA',
-            'ldap': 'jgarcia',
-            'moma_url': 'https://example.com/jgarcia',
-            'manager_name': 'Michael Johnson',
-            'manager_email': 'mjohnson@company.com',
-            'moma_photo_url': 'https://example.com/photos/jgarcia.jpg',
-            'manager_name_input': 'Michael Johnson',
-            'location_input': 'Chicago',
-            'time_of_run': '2024-01-01',
-            'relationship_with_qt': 'Indirect',
-            'representative_from_qt': 'Dennis'
-        },
-        {
-            'name': 'Robert Lee',
-            'position': 'Senior Sales Manager',
-            'department': 'Sales',
-            'country': 'USA',
-            'ldap': 'rlee',
-            'moma_url': 'https://example.com/rlee',
-            'manager_name': 'Jennifer Garcia',
-            'manager_email': 'jgarcia@company.com',
-            'moma_photo_url': 'https://example.com/photos/rlee.jpg',
-            'manager_name_input': 'Jennifer Garcia',
-            'location_input': 'Austin',
-            'time_of_run': '2024-01-01',
-            'relationship_with_qt': 'Direct',
-            'representative_from_qt': 'Mike'
-        },
-
-        # HR Team - UK & India
-        {
-            'name': 'Sophie Taylor',
-            'position': 'VP Human Resources',
-            'department': 'Human Resources',
-            'country': 'UK',
-            'ldap': 'staylor',
-            'moma_url': 'https://example.com/staylor',
-            'manager_name': 'Sarah Williams',
-            'manager_email': 'swilliams@company.com',
-            'moma_photo_url': 'https://example.com/photos/staylor.jpg',
-            'manager_name_input': 'Sarah Williams',
-            'location_input': 'London',
-            'time_of_run': '2024-01-01',
-            'relationship_with_qt': 'Direct',
-            'representative_from_qt': 'Matt'
-        },
-        {
-            'name': 'Ananya Gupta',
-            'position': 'HR Business Partner',
-            'department': 'Human Resources',
-            'country': 'India',
-            'ldap': 'agupta',
-            'moma_url': 'https://example.com/agupta',
-            'manager_name': 'Sophie Taylor',
-            'manager_email': 'staylor@company.com',
-            'moma_photo_url': 'https://example.com/photos/agupta.jpg',
-            'manager_name_input': 'Sophie Taylor',
-            'location_input': 'Chennai',
-            'time_of_run': '2024-01-01',
-            'relationship_with_qt': 'Indirect',
-            'representative_from_qt': 'Dennis'
-        },
-
-        # Product Team - USA & Portugal
-        {
-            'name': 'David Chen',
-            'position': 'VP Product',
-            'department': 'Product',
-            'country': 'USA',
-            'ldap': 'dchen',
-            'moma_url': 'https://example.com/dchen',
-            'manager_name': 'Sarah Williams',
-            'manager_email': 'swilliams@company.com',
-            'moma_photo_url': 'https://example.com/photos/dchen.jpg',
-            'manager_name_input': 'Sarah Williams',
-            'location_input': 'Seattle',
-            'time_of_run': '2024-01-01',
-            'relationship_with_qt': 'Direct',
-            'representative_from_qt': 'Matt'
-        },
-        {
-            'name': 'Ricardo Oliveira',
-            'position': 'Product Manager',
-            'department': 'Product',
-            'country': 'Portugal',
-            'ldap': 'roliveira',
-            'moma_url': 'https://example.com/roliveira',
-            'manager_name': 'David Chen',
-            'manager_email': 'dchen@company.com',
-            'moma_photo_url': 'https://example.com/photos/roliveira.jpg',
-            'manager_name_input': 'David Chen',
-            'location_input': 'Braga',
-            'time_of_run': '2024-01-01',
-            'relationship_with_qt': 'Indirect',
-            'representative_from_qt': 'Mike'
-        },
-
-        # Customer Support - Multiple locations
-        {
-            'name': 'Lisa Anderson',
-            'position': 'VP Customer Success',
-            'department': 'Customer Support',
-            'country': 'USA',
-            'ldap': 'landerson',
-            'moma_url': 'https://example.com/landerson',
-            'manager_name': 'Sarah Williams',
-            'manager_email': 'swilliams@company.com',
-            'moma_photo_url': 'https://example.com/photos/landerson.jpg',
-            'manager_name_input': 'Sarah Williams',
-            'location_input': 'Denver',
-            'time_of_run': '2024-01-01',
-            'relationship_with_qt': 'Direct',
-            'representative_from_qt': 'Lihi'
-        },
-        {
-            'name': 'Ravi Mehta',
-            'position': 'Customer Support Manager',
-            'department': 'Customer Support',
-            'country': 'India',
-            'ldap': 'rmehta',
-            'moma_url': 'https://example.com/rmehta',
-            'manager_name': 'Lisa Anderson',
-            'manager_email': 'landerson@company.com',
-            'moma_photo_url': 'https://example.com/photos/rmehta.jpg',
-            'manager_name_input': 'Lisa Anderson',
-            'location_input': 'Pune',
-            'time_of_run': '2024-01-01',
-            'relationship_with_qt': 'Indirect',
-            'representative_from_qt': 'No'
-        }
+        # Add more sample data as needed...
     ]
-
-# Global variables to store data
-company_data = load_sample_data()
-new_connections = []  # Store new connections
-
-# Google Apps Script URL (you need to set this up)
-GOOGLE_SCRIPT_URL = None  # Replace with your actual Apps Script URL when ready
 
 def build_hierarchy_tree(data, root_person=None):
     """Build a hierarchical tree structure from flat data"""
-    # Create lookup dictionaries
     person_dict = {person['name']: person for person in data}
     children_dict = defaultdict(list)
     
-    # Build children relationships
     for person in data:
         manager = person.get('manager_name')
         if manager and manager in person_dict:
@@ -488,8 +264,7 @@ def build_hierarchy_tree(data, root_person=None):
             'children': []
         }
         
-        # Recursively build children
-        for child_name in sorted(children_dict.get(person_name, [])):  # Sort for consistent ordering
+        for child_name in sorted(children_dict.get(person_name, [])):
             child_node = build_node(child_name)
             if child_node:
                 node['children'].append(child_node)
@@ -499,7 +274,6 @@ def build_hierarchy_tree(data, root_person=None):
     if root_person:
         return build_node(root_person)
     else:
-        # Find root nodes (people with no managers or managers not in dataset)
         roots = []
         for person in data:
             manager = person.get('manager_name')
@@ -512,7 +286,6 @@ def build_hierarchy_tree(data, root_person=None):
 def get_all_subordinates(person_name, data):
     """Get all people reporting under a person (direct and indirect)"""
     subordinates = []
-    person_dict = {person['name']: person for person in data}
     
     def find_reports(manager_name):
         for person in data:
@@ -530,7 +303,6 @@ def normalize_name(name):
 def add_connection_to_google_sheets(connection_data):
     """Send connection data to Google Apps Script (if configured)"""
     if not GOOGLE_SCRIPT_URL:
-        logger.info("Google Sheets integration not configured (GOOGLE_SCRIPT_URL not set)")
         return False
     
     try:
@@ -543,19 +315,15 @@ def add_connection_to_google_sheets(connection_data):
         
         if response.status_code == 200:
             result = response.json()
-            if result.get('success'):
-                logger.info("Successfully added connection to Google Sheets")
-                return True
-            else:
-                logger.error(f"Google Sheets error: {result.get('error')}")
-                return False
-        else:
-            logger.error(f"HTTP error: {response.status_code}")
-            return False
+            return result.get('success', False)
+        return False
             
     except Exception as e:
         logger.error(f"Error sending to Google Sheets: {str(e)}")
         return False
+
+# Initialize data on startup
+load_data_from_excel()
 
 # Routes
 @app.route('/')
@@ -573,6 +341,11 @@ def add_connection():
     """Add connection page"""
     return render_template('add_connection.html')
 
+@app.route('/manage-structure')
+def manage_structure():
+    """Manage reporting structure page"""
+    return render_template('manage_structure.html')
+
 @app.route('/api/search')
 def search():
     """Search for employees with optional filters"""
@@ -580,12 +353,8 @@ def search():
     department_filter = request.args.get('department', '').strip()
     country_filter = request.args.get('country', '').strip()
     
-    logger.info(f"Search request: query='{query}', department='{department_filter}', country='{country_filter}'")
-    
-    # Start with all data
     filtered_data = company_data.copy()
     
-    # Apply search query filter
     if query:
         filtered_data = [
             person for person in filtered_data
@@ -595,27 +364,18 @@ def search():
                 query in person.get('location_input', '').lower())
         ]
     
-    # Apply department filter
     if department_filter:
         filtered_data = [person for person in filtered_data if person['department'] == department_filter]
     
-    # Apply country filter
     if country_filter:
         filtered_data = [person for person in filtered_data if person['country'] == country_filter]
     
-    logger.info(f"Search results: {len(filtered_data)} employees found")
-    
-    # Sort results by name for consistency
     filtered_data.sort(key=lambda x: x['name'])
-    
     return jsonify(filtered_data)
 
 @app.route('/api/hierarchy/<person_name>')
 def get_hierarchy(person_name):
     """Get organizational hierarchy for a specific person"""
-    logger.info(f"Hierarchy request for: {person_name}")
-    
-    # Find the person (case-insensitive)
     person = None
     for p in company_data:
         if normalize_name(p['name']) == normalize_name(person_name):
@@ -623,30 +383,20 @@ def get_hierarchy(person_name):
             break
     
     if not person:
-        logger.warning(f"Person not found: {person_name}")
         return jsonify({'error': 'Person not found'}), 404
     
-    # Get all subordinates
     subordinates = get_all_subordinates(person['name'], company_data)
-    
-    # Build hierarchy tree starting from this person
     all_people = [person] + subordinates
     hierarchy = build_hierarchy_tree(all_people, person['name'])
     
     if not hierarchy:
-        logger.warning(f"Could not build hierarchy for: {person_name}")
         return jsonify({'error': 'Could not build hierarchy'}), 500
-    
-    logger.info(f"Hierarchy built for {person_name}: {len(subordinates)} subordinates found")
     
     return jsonify(hierarchy)
 
 @app.route('/api/map-data/<person_name>')
 def get_map_data(person_name):
     """Get geographic distribution data for map visualization"""
-    logger.info(f"Map data request for: {person_name}")
-    
-    # Find the person (case-insensitive)
     person = None
     for p in company_data:
         if normalize_name(p['name']) == normalize_name(person_name):
@@ -654,13 +404,11 @@ def get_map_data(person_name):
             break
     
     if not person:
-        logger.warning(f"Person not found for map data: {person_name}")
         return jsonify({'error': 'Person not found'}), 404
     
     subordinates = get_all_subordinates(person['name'], company_data)
     all_people = [person] + subordinates
     
-    # Group by location for map visualization
     location_data = defaultdict(list)
     for p in all_people:
         location = p.get('location_input', 'Unknown')
@@ -675,7 +423,6 @@ def get_map_data(person_name):
             'representative_from_qt': p.get('representative_from_qt', 'No')
         })
     
-    # Convert to format suitable for map visualization
     map_data = []
     for location, people in location_data.items():
         map_data.append({
@@ -685,11 +432,7 @@ def get_map_data(person_name):
             'country': people[0]['country'] if people else ''
         })
     
-    # Sort by count for consistency
     map_data.sort(key=lambda x: x['count'], reverse=True)
-    
-    logger.info(f"Map data generated for {person_name}: {len(map_data)} locations")
-    
     return jsonify(map_data)
 
 @app.route('/api/filters')
@@ -705,49 +448,27 @@ def get_filters():
 
 @app.route('/api/add-connection', methods=['POST'])
 def add_connection_api():
-    """Add a new connection and store it both locally and optionally in Google Sheets"""
+    """Add a new connection and store it"""
     try:
-        # Get the JSON data from request
         connection_data = request.get_json()
         
         if not connection_data:
-            logger.error("No data received in request")
-            return jsonify({
-                'success': False,
-                'message': 'No data received'
-            }), 400
+            return jsonify({'success': False, 'message': 'No data received'}), 400
         
-        logger.info(f"New connection data received: {connection_data}")
-        
-        # Add ID and timestamp
         connection_data['id'] = len(new_connections) + 1
         connection_data['created_at'] = datetime.now().isoformat()
         
-        # Store locally
         new_connections.append(connection_data)
-        
-        # Try to add to Google Sheets (if configured)
         sheets_success = add_connection_to_google_sheets(connection_data)
         
-        logger.info(f"Connection stored locally. Google Sheets: {'Success' if sheets_success else 'Skipped/Failed'}")
-        
-        # Print detailed information to console
         print("=" * 60)
         print("NEW CONNECTION ADDED:")
         print("=" * 60)
-        print(f"ID: {connection_data.get('id')}")
         print(f"Name: {connection_data.get('name', 'N/A')}")
         print(f"Email: {connection_data.get('email', 'N/A')}")
         print(f"Designation: {connection_data.get('designation', 'N/A')}")
-        print(f"Department: {connection_data.get('department', 'N/A')}")
         print(f"Connection Champion: {connection_data.get('connectionChampion', 'N/A')}")
-        print(f"Degree: {connection_data.get('degreeOfConnection', 'N/A')}")
-        print(f"MOMA URL: {connection_data.get('momaUrl', 'N/A')}")
-        print(f"Date Added: {connection_data.get('dateAdded', 'N/A')}")
-        print(f"Created At: {connection_data.get('created_at', 'N/A')}")
-        print(f"Google Sheets: {'✓ Success' if sheets_success else '✗ Not configured/Failed'}")
-        print("=" * 60)
-        print(f"TOTAL CONNECTIONS IN DATABASE: {len(new_connections)}")
+        print(f"Google Sheets: {'✓ Success' if sheets_success else '✗ Not configured'}")
         print("=" * 60)
         
         return jsonify({
@@ -760,12 +481,158 @@ def add_connection_api():
     
     except Exception as e:
         logger.error(f"Error adding connection: {str(e)}")
-        print(f"ERROR ADDING CONNECTION: {str(e)}")
+        return jsonify({'success': False, 'message': 'Failed to add connection', 'error': str(e)}), 500
+
+@app.route('/api/update-structure', methods=['POST'])
+def update_structure():
+    """Update organizational structure"""
+    try:
+        data = request.get_json()
+        action = data.get('action')
+        
+        if action == 'change_manager':
+            employee_name = data.get('employeeName')
+            new_manager_name = data.get('newManagerName')
+            
+            # Find and update employee
+            for person in company_data:
+                if person['name'] == employee_name:
+                    person['manager_name'] = new_manager_name
+                    person['manager_name_input'] = new_manager_name
+                    break
+            
+            # Save changes to Excel
+            save_data_to_excel()
+            
+            print("=" * 60)
+            print("MANAGER ASSIGNMENT CHANGED:")
+            print("=" * 60)
+            print(f"Employee: {employee_name}")
+            print(f"New Manager: {new_manager_name}")
+            print("=" * 60)
+            
+            return jsonify({'success': True, 'message': 'Manager assignment updated successfully'})
+        
+        elif action == 'add_employee':
+            new_employee = {
+                'name': data.get('name'),
+                'position': data.get('position'),
+                'department': data.get('department'),
+                'country': data.get('country'),
+                'location_input': data.get('location'),
+                'manager_name': data.get('managerName'),
+                'manager_name_input': data.get('managerName'),
+                'ldap': data.get('name', '').lower().replace(' ', '.'),
+                'moma_url': f"https://example.com/{data.get('name', '').lower().replace(' ', '.')}",
+                'manager_email': '',
+                'moma_photo_url': '',
+                'time_of_run': datetime.now().strftime('%Y-%m-%d'),
+                'relationship_with_qt': 'None',
+                'representative_from_qt': 'No'
+            }
+            
+            company_data.append(new_employee)
+            save_data_to_excel()
+            
+            print("=" * 60)
+            print("NEW EMPLOYEE ADDED:")
+            print("=" * 60)
+            print(f"Name: {new_employee['name']}")
+            print(f"Position: {new_employee['position']}")
+            print(f"Department: {new_employee['department']}")
+            print(f"Manager: {new_employee['manager_name']}")
+            print("=" * 60)
+            
+            return jsonify({'success': True, 'message': 'Employee added successfully'})
+        
+        else:
+            return jsonify({'success': False, 'message': 'Invalid action'}), 400
+    
+    except Exception as e:
+        logger.error(f"Error updating structure: {str(e)}")
+        return jsonify({'success': False, 'message': 'Failed to update structure', 'error': str(e)}), 500
+
+@app.route('/api/upload-structure', methods=['POST'])
+def upload_structure():
+    """Upload and process Excel file with organizational data"""
+    try:
+        if 'file' not in request.files:
+            return jsonify({'success': False, 'message': 'No file uploaded'}), 400
+        
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({'success': False, 'message': 'No file selected'}), 400
+        
+        if not allowed_file(file.filename):
+            return jsonify({'success': False, 'message': 'Invalid file type'}), 400
+        
+        # Save uploaded file
+        filename = secure_filename(file.filename)
+        file_path = os.path.join(UPLOAD_FOLDER, filename)
+        file.save(file_path)
+        
+        # Load data from uploaded file
+        load_data_from_excel(file_path)
+        
+        print("=" * 60)
+        print("ORGANIZATIONAL DATA UPLOADED:")
+        print("=" * 60)
+        print(f"File: {filename}")
+        print(f"Employees loaded: {len(company_data)}")
+        print("=" * 60)
+        
         return jsonify({
-            'success': False,
-            'message': 'Failed to add connection',
-            'error': str(e)
-        }), 500
+            'success': True,
+            'message': f'File processed successfully. Loaded {len(company_data)} employees.',
+            'employees_count': len(company_data)
+        })
+    
+    except Exception as e:
+        logger.error(f"Error processing uploaded file: {str(e)}")
+        return jsonify({'success': False, 'message': 'Failed to process file', 'error': str(e)}), 500
+
+@app.route('/api/download-structure')
+def download_structure():
+    """Download current organizational structure as Excel file"""
+    try:
+        # Create Excel file in memory
+        output = io.BytesIO()
+        
+        # Convert data to DataFrame
+        df = pd.DataFrame(company_data)
+        
+        # Reorder columns
+        column_order = [
+            'name', 'position', 'department', 'country', 'location_input',
+            'manager_name', 'relationship_with_qt', 'representative_from_qt'
+        ]
+        
+        for col in column_order:
+            if col not in df.columns:
+                df[col] = ''
+        
+        df = df[column_order]
+        df.columns = [
+            'Name', 'Position', 'Department', 'Country', 'Location',
+            'Manager Name', 'QT Relationship', 'QT Representative'
+        ]
+        
+        # Write to Excel
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df.to_excel(writer, sheet_name='Organization Data', index=False)
+        
+        output.seek(0)
+        
+        return send_file(
+            io.BytesIO(output.read()),
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            as_attachment=True,
+            download_name=f'organization_structure_{datetime.now().strftime("%Y%m%d_%H%M%S")}.xlsx'
+        )
+    
+    except Exception as e:
+        logger.error(f"Error creating download file: {str(e)}")
+        return jsonify({'success': False, 'message': 'Failed to create download file'}), 500
 
 @app.route('/api/connections')
 def get_connections():
@@ -782,9 +649,7 @@ def get_stats():
     total_employees = len(company_data)
     departments = len(set(person['department'] for person in company_data))
     countries = len(set(person['country'] for person in company_data))
-    locations = len(set(person.get('location_input', 'Unknown') for person in company_data))
     
-    # Connection statistics
     direct_connections = len([p for p in company_data if p.get('relationship_with_qt', '').lower() == 'direct'])
     indirect_connections = len([p for p in company_data if p.get('relationship_with_qt', '').lower() == 'indirect'])
     no_connections = total_employees - direct_connections - indirect_connections
@@ -793,7 +658,6 @@ def get_stats():
         'total_employees': total_employees,
         'departments': departments,
         'countries': countries,
-        'locations': locations,
         'connections': {
             'direct': direct_connections,
             'indirect': indirect_connections,
@@ -801,47 +665,47 @@ def get_stats():
         }
     })
 
-# Error handlers
-@app.errorhandler(404)
-def not_found_error(error):
-    return jsonify({'error': 'Not found'}), 404
+@app.route('/api/system-info')
+def get_system_info():
+    """Get system information and data source details"""
+    data_source = "Excel File" if excel_file_path else "Sample Data"
+    
+    return jsonify({
+        'success': True,
+        'data_source': data_source,
+        'excel_file': os.path.basename(excel_file_path) if excel_file_path else None,
+        'total_employees': len(company_data),
+        'last_updated': datetime.now().isoformat(),
+        'sharepoint_enabled': SHAREPOINT_AVAILABLE and bool(SHAREPOINT_URL),
+        'upload_folder': UPLOAD_FOLDER,
+        'supported_formats': list(ALLOWED_EXTENSIONS)
+    })
 
-@app.errorhandler(500)
-def internal_error(error):
-    return jsonify({'error': 'Internal server error'}), 500
-
-# Health check endpoint
 @app.route('/health')
 def health_check():
     return jsonify({
         'status': 'healthy',
         'employees_loaded': len(company_data),
         'new_connections': len(new_connections),
-        'google_sheets_configured': GOOGLE_SCRIPT_URL is not None,
-        'version': '1.0.0'
+        'excel_file_configured': excel_file_path is not None,
+        'sharepoint_available': SHAREPOINT_AVAILABLE,
+        'version': '2.0.0'
     })
 
 if __name__ == '__main__':
-    logger.info("Starting Smart Stakeholder Search Flask application...")
+    logger.info("Starting Smart Stakeholder Search Flask application with Excel integration...")
     logger.info(f"Loaded {len(company_data)} employees")
     
-    # Print some startup info
-    departments = set(person['department'] for person in company_data)
-    countries = set(person['country'] for person in company_data)
-    logger.info(f"Departments: {', '.join(sorted(departments))}")
-    logger.info(f"Countries: {', '.join(sorted(countries))}")
-    
     print("\n" + "="*60)
-    print("SMART STAKEHOLDER SEARCH - SERVER STARTED")
+    print("SMART STAKEHOLDER SEARCH v2.0 - SERVER STARTED")
     print("="*60)
-    print(f"Server running at: http://localhost:5000")
-    print(f"Landing page: http://localhost:5000/")
-    print(f"Explore org: http://localhost:5000/explore")
-    print(f"Add connections: http://localhost:5000/add-connection")
-    print(f"View connections: http://localhost:5000/api/connections")
-    print(f"Google Sheets: {'Configured' if GOOGLE_SCRIPT_URL else 'Not configured'}")
-    print("="*60)
-    print("Ready to accept connections!")
+    print(f"Server running at: http://localhost:8080")
+    print(f"Landing page: http://localhost:8080/")
+    print(f"Explore org: http://localhost:8080/explore")
+    print(f"Add connections: http://localhost:8080/add-connection")
+    print(f"Manage structure: http://localhost:8080/manage-structure")
+    print(f"Excel integration: {'Enabled' if excel_file_path else 'Fallback to sample data'}")
+    print(f"SharePoint integration: {'Available' if SHAREPOINT_AVAILABLE else 'Not installed'}")
     print("="*60)
     
-    app.run(debug=True, port=5000)
+    app.run(debug=True, port=8080)

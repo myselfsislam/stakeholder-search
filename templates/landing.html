@@ -57,13 +57,16 @@
             line-height: 1.6;
             font-weight: 400;
             letter-spacing: -0.025em;
+            display: flex;
+            align-items: center;
+            justify-content: center;
             padding: 24px;
         }
 
         /* Main Container */
         .landing-container {
-            max-width: 1600px;
-            margin: 0 auto;
+            max-width: 900px;
+            width: 100%;
             background: var(--glass-bg);
             border-radius: 32px;
             border: 1px solid var(--glass-border);
@@ -216,7 +219,6 @@
             justify-content: center;
             margin: 0 auto 24px;
             font-size: 36px;
-            color: white;
             box-shadow: var(--shadow-medium);
             transition: transform 0.3s ease;
         }
@@ -448,10 +450,100 @@
                     </p>
                     <a href="/add-connection" class="feature-button">Add Connection</a>
                 </div>
+
+                <div class="feature-card" onclick="window.location.href='/manage-structure'">
+                    <div class="feature-icon">⚙️</div>
+                    <h3 class="feature-title">Manage Structure</h3>
+                    <p class="feature-description">
+                        Update organizational hierarchy and reporting relationships. Change managers, add employees, update details, and upload organizational data from Excel files.
+                    </p>
+                    <a href="/manage-structure" class="feature-button">Manage Structure</a>
+                </div>
             </div>
         </section>
 
+        <!-- Stats Section -->
+        <section class="stats-section">
+            <div class="stats-grid">
+                <div class="stat-item">
+                    <div class="stat-number" id="total-employees">—</div>
+                    <div class="stat-label">Total Employees</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-number" id="departments">—</div>
+                    <div class="stat-label">Departments</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-number" id="countries">—</div>
+                    <div class="stat-label">Countries</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-number" id="direct-connections">—</div>
+                    <div class="stat-label">Direct Connections</div>
+                </div>
+            </div>
+        </section>
+    </div>
+
     <script>
+        // Load statistics on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            loadStats();
+        });
+
+        async function loadStats() {
+            try {
+                const response = await fetch('/api/stats');
+                if (!response.ok) {
+                    throw new Error('Failed to load stats');
+                }
+                
+                const stats = await response.json();
+                
+                // Animate the numbers
+                animateNumber('total-employees', stats.total_employees);
+                animateNumber('departments', stats.departments);
+                animateNumber('countries', stats.countries);
+                animateNumber('direct-connections', stats.connections.direct);
+                
+            } catch (error) {
+                console.error('Error loading stats:', error);
+                // Show placeholder values if API fails
+                document.getElementById('total-employees').textContent = '25+';
+                document.getElementById('departments').textContent = '8';
+                document.getElementById('countries').textContent = '4';
+                document.getElementById('direct-connections').textContent = '12';
+            }
+        }
+
+        function animateNumber(elementId, targetNumber) {
+            const element = document.getElementById(elementId);
+            const duration = 2000; // 2 seconds
+            const increment = targetNumber / (duration / 50); // Update every 50ms
+            let current = 0;
+            
+            const timer = setInterval(() => {
+                current += increment;
+                if (current >= targetNumber) {
+                    element.textContent = targetNumber;
+                    clearInterval(timer);
+                } else {
+                    element.textContent = Math.floor(current);
+                }
+            }, 50);
+        }
+
+        // Add click handlers for feature cards
+        document.addEventListener('click', function(e) {
+            const card = e.target.closest('.feature-card');
+            if (card && e.target.tagName !== 'A') {
+                const link = card.querySelector('.feature-button');
+                if (link) {
+                    window.location.href = link.href;
+                }
+            }
+        });
+
         console.log('Smart Stakeholder Search landing page loaded successfully');
     </script>
 </body>
