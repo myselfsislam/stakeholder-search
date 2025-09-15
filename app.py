@@ -13,6 +13,7 @@ from werkzeug.utils import secure_filename
 import openpyxl
 from openpyxl import Workbook
 import io
+import random
 
 # Office365/SharePoint integration (optional)
 try:
@@ -200,42 +201,322 @@ def upload_to_sharepoint(file_path):
         return False
 
 def load_sample_data():
-    """Fallback sample data if no Excel file is available"""
-    return [
-        {
-            'name': 'Sarah Williams',
-            'position': 'CEO',
-            'department': 'Executive',
-            'country': 'USA',
-            'ldap': 'swilliams',
-            'moma_url': 'https://example.com/swilliams',
-            'manager_name': '',
-            'manager_email': '',
-            'moma_photo_url': 'https://example.com/photos/swilliams.jpg',
-            'manager_name_input': '',
-            'location_input': 'New York',
-            'time_of_run': '2024-01-01',
-            'relationship_with_qt': 'Direct',
-            'representative_from_qt': 'Mayank'
+    """Enhanced sample data with 150 employees for thorough testing"""
+    # Define company structure
+    departments = {
+        'Executive': {
+            'positions': ['CEO', 'COO', 'CFO', 'CTO', 'CHRO', 'CMO'],
+            'locations': ['New York', 'San Francisco', 'London']
         },
-        {
-            'name': 'James Thompson',
-            'position': 'CTO',
-            'department': 'Engineering',
-            'country': 'UK',
-            'ldap': 'jthompson',
-            'moma_url': 'https://example.com/jthompson',
-            'manager_name': 'Sarah Williams',
-            'manager_email': 'swilliams@company.com',
-            'moma_photo_url': 'https://example.com/photos/jthompson.jpg',
-            'manager_name_input': 'Sarah Williams',
-            'location_input': 'London',
-            'time_of_run': '2024-01-01',
-            'relationship_with_qt': 'Direct',
-            'representative_from_qt': 'Mayank'
+        'Engineering': {
+            'positions': ['VP Engineering', 'Engineering Director', 'Senior Engineering Manager', 
+                         'Engineering Manager', 'Principal Engineer', 'Senior Software Engineer', 
+                         'Software Engineer', 'Junior Software Engineer', 'DevOps Engineer', 
+                         'Site Reliability Engineer', 'QA Engineer', 'Security Engineer'],
+            'locations': ['San Francisco', 'Seattle', 'Austin', 'Bangalore', 'London', 'Berlin']
         },
-        # Add more sample data as needed...
+        'Product': {
+            'positions': ['VP Product', 'Product Director', 'Senior Product Manager', 
+                         'Product Manager', 'Associate Product Manager', 'Product Owner', 
+                         'UX Director', 'Senior UX Designer', 'UX Designer', 'UI Designer'],
+            'locations': ['San Francisco', 'New York', 'London', 'Austin']
+        },
+        'Sales': {
+            'positions': ['VP Sales', 'Sales Director', 'Regional Sales Manager', 
+                         'Senior Account Executive', 'Account Executive', 'Sales Development Rep',
+                         'Customer Success Manager', 'Account Manager'],
+            'locations': ['New York', 'Chicago', 'Austin', 'London', 'Munich']
+        },
+        'Marketing': {
+            'positions': ['VP Marketing', 'Marketing Director', 'Brand Manager', 
+                         'Digital Marketing Manager', 'Content Manager', 'Marketing Specialist',
+                         'Growth Marketing Manager', 'Marketing Analyst'],
+            'locations': ['New York', 'San Francisco', 'Austin', 'London']
+        },
+        'Operations': {
+            'positions': ['VP Operations', 'Operations Director', 'Operations Manager',
+                         'Business Analyst', 'Data Analyst', 'Operations Specialist',
+                         'Program Manager', 'Project Manager'],
+            'locations': ['New York', 'Denver', 'Austin', 'London', 'Mumbai']
+        },
+        'Human Resources': {
+            'positions': ['VP Human Resources', 'HR Director', 'HR Business Partner',
+                         'Talent Acquisition Manager', 'HR Generalist', 'Recruiter',
+                         'People Operations Specialist', 'Learning & Development Manager'],
+            'locations': ['New York', 'San Francisco', 'Austin', 'London']
+        },
+        'Finance': {
+            'positions': ['VP Finance', 'Finance Director', 'Senior Financial Analyst',
+                         'Financial Analyst', 'Controller', 'Accounting Manager',
+                         'Revenue Operations Manager', 'FP&A Analyst'],
+            'locations': ['New York', 'Austin', 'London']
+        },
+        'Legal': {
+            'positions': ['General Counsel', 'Senior Legal Counsel', 'Legal Counsel',
+                         'Compliance Manager', 'Contracts Manager'],
+            'locations': ['New York', 'San Francisco', 'London']
+        },
+        'Data Science': {
+            'positions': ['VP Data', 'Data Science Director', 'Principal Data Scientist',
+                         'Senior Data Scientist', 'Data Scientist', 'ML Engineer',
+                         'Data Engineer', 'Analytics Engineer'],
+            'locations': ['San Francisco', 'Seattle', 'Austin', 'Bangalore', 'London']
+        }
+    }
+    
+    # Location to country mapping
+    location_country = {
+        'New York': 'USA', 'San Francisco': 'USA', 'Chicago': 'USA', 'Austin': 'USA',
+        'Seattle': 'USA', 'Denver': 'USA',
+        'London': 'UK', 'Manchester': 'UK',
+        'Berlin': 'Germany', 'Munich': 'Germany', 'Hamburg': 'Germany',
+        'Lisbon': 'Portugal', 'Porto': 'Portugal', 'Braga': 'Portugal',
+        'Mumbai': 'India', 'Bangalore': 'India', 'Delhi': 'India', 'Chennai': 'India', 'Pune': 'India'
+    }
+    
+    # QT representatives (connection champions)
+    qt_representatives = ['Mayank', 'Lihi', 'Dennis', 'Mike', 'Matt', 'Sarah K', 'Alex', 'Jordan']
+    
+    # Relationship types with weights
+    relationship_types = ['Direct', 'Indirect', 'None']
+    relationship_weights = [0.15, 0.25, 0.60]  # 15% direct, 25% indirect, 60% none
+    
+    # First and last names for realistic employee generation
+    first_names = [
+        'James', 'Mary', 'Michael', 'Patricia', 'Robert', 'Jennifer', 'William', 'Linda',
+        'David', 'Elizabeth', 'Richard', 'Barbara', 'Joseph', 'Susan', 'Thomas', 'Jessica',
+        'Christopher', 'Sarah', 'Daniel', 'Karen', 'Matthew', 'Nancy', 'Anthony', 'Lisa',
+        'Mark', 'Betty', 'Donald', 'Helen', 'Steven', 'Sandra', 'Paul', 'Donna',
+        'Andrew', 'Carol', 'Joshua', 'Ruth', 'Kenneth', 'Sharon', 'Kevin', 'Michelle',
+        'Brian', 'Laura', 'George', 'Sarah', 'Timothy', 'Kimberly', 'Ronald', 'Deborah',
+        'Jason', 'Dorothy', 'Edward', 'Lisa', 'Jeffrey', 'Nancy', 'Ryan', 'Karen',
+        'Jacob', 'Betty', 'Gary', 'Helen', 'Nicholas', 'Sandra', 'Eric', 'Donna',
+        'Jonathan', 'Carol', 'Stephen', 'Ruth', 'Larry', 'Sharon', 'Justin', 'Michelle',
+        'Scott', 'Laura', 'Brandon', 'Sarah', 'Benjamin', 'Kimberly', 'Samuel', 'Deborah',
+        'Alexander', 'Dorothy', 'Patrick', 'Amy', 'Jack', 'Angela', 'Dennis', 'Emma',
+        'Jerry', 'Brenda', 'Tyler', 'Olivia', 'Aaron', 'Cynthia', 'Jose', 'Marie',
+        'Henry', 'Janet', 'Adam', 'Frances', 'Douglas', 'Catherine', 'Nathan', 'Samantha',
+        'Peter', 'Debra', 'Zachary', 'Rachel', 'Kyle', 'Carolyn', 'Noah', 'Janet'
     ]
+    
+    last_names = [
+        'Smith', 'Johnson', 'Williams', 'Brown', 'Jones', 'Garcia', 'Miller', 'Davis',
+        'Rodriguez', 'Martinez', 'Hernandez', 'Lopez', 'Gonzalez', 'Wilson', 'Anderson', 'Thomas',
+        'Taylor', 'Moore', 'Jackson', 'Martin', 'Lee', 'Perez', 'Thompson', 'White',
+        'Harris', 'Sanchez', 'Clark', 'Ramirez', 'Lewis', 'Robinson', 'Walker', 'Young',
+        'Allen', 'King', 'Wright', 'Scott', 'Torres', 'Nguyen', 'Hill', 'Flores',
+        'Green', 'Adams', 'Nelson', 'Baker', 'Hall', 'Rivera', 'Campbell', 'Mitchell',
+        'Carter', 'Roberts', 'Gomez', 'Phillips', 'Evans', 'Turner', 'Diaz', 'Parker',
+        'Cruz', 'Edwards', 'Collins', 'Reyes', 'Stewart', 'Morris', 'Morales', 'Murphy',
+        'Cook', 'Rogers', 'Gutierrez', 'Ortiz', 'Morgan', 'Cooper', 'Peterson', 'Bailey',
+        'Reed', 'Kelly', 'Howard', 'Ramos', 'Kim', 'Cox', 'Ward', 'Richardson',
+        'Watson', 'Brooks', 'Chavez', 'Wood', 'James', 'Bennett', 'Gray', 'Mendoza'
+    ]
+    
+    employees = []
+    
+    # Helper function to generate unique name
+    def generate_unique_name(existing_names):
+        while True:
+            first = random.choice(first_names)
+            last = random.choice(last_names)
+            name = f"{first} {last}"
+            if name not in existing_names:
+                existing_names.add(name)
+                return name
+    
+    # Helper function to generate LDAP
+    def generate_ldap(name):
+        parts = name.lower().split()
+        return f"{parts[0][0]}{parts[-1]}".replace(' ', '')
+    
+    existing_names = set()
+    
+    # 1. Create CEO
+    ceo_name = generate_unique_name(existing_names)
+    employees.append({
+        'name': ceo_name,
+        'position': 'CEO',
+        'department': 'Executive',
+        'country': 'USA',
+        'ldap': generate_ldap(ceo_name),
+        'moma_url': f"https://example.com/{generate_ldap(ceo_name)}",
+        'manager_name': '',
+        'manager_email': '',
+        'moma_photo_url': f"https://example.com/photos/{generate_ldap(ceo_name)}.jpg",
+        'manager_name_input': '',
+        'location_input': 'New York',
+        'time_of_run': '2024-01-01',
+        'relationship_with_qt': random.choices(relationship_types, weights=relationship_weights)[0],
+        'representative_from_qt': random.choice(qt_representatives)
+    })
+    
+    # 2. Create C-level executives (reporting to CEO)
+    c_level_positions = ['COO', 'CFO', 'CTO', 'CHRO', 'CMO']
+    c_level_employees = []
+    
+    for position in c_level_positions:
+        name = generate_unique_name(existing_names)
+        location = random.choice(departments['Executive']['locations'])
+        country = location_country[location]
+        
+        employee = {
+            'name': name,
+            'position': position,
+            'department': 'Executive',
+            'country': country,
+            'ldap': generate_ldap(name),
+            'moma_url': f"https://example.com/{generate_ldap(name)}",
+            'manager_name': ceo_name,
+            'manager_email': f"{generate_ldap(ceo_name)}@company.com",
+            'moma_photo_url': f"https://example.com/photos/{generate_ldap(name)}.jpg",
+            'manager_name_input': ceo_name,
+            'location_input': location,
+            'time_of_run': '2024-01-01',
+            'relationship_with_qt': random.choices(relationship_types, weights=relationship_weights)[0],
+            'representative_from_qt': random.choice(qt_representatives)
+        }
+        employees.append(employee)
+        c_level_employees.append(employee)
+    
+    # 3. Create VPs and Directors (reporting to C-level)
+    vp_director_count = 25
+    vp_director_employees = []
+    
+    for i in range(vp_director_count):
+        # Choose department (excluding Executive)
+        dept_name = random.choice([d for d in departments.keys() if d != 'Executive'])
+        dept_info = departments[dept_name]
+        
+        # Choose position (VP or Director level)
+        vp_positions = [pos for pos in dept_info['positions'] if 'VP' in pos or 'Director' in pos]
+        if not vp_positions:
+            continue
+            
+        position = random.choice(vp_positions)
+        name = generate_unique_name(existing_names)
+        location = random.choice(dept_info['locations'])
+        country = location_country[location]
+        
+        # Choose manager from C-level
+        if dept_name == 'Engineering':
+            manager = next((emp for emp in c_level_employees if emp['position'] == 'CTO'), random.choice(c_level_employees))
+        elif dept_name == 'Human Resources':
+            manager = next((emp for emp in c_level_employees if emp['position'] == 'CHRO'), random.choice(c_level_employees))
+        elif dept_name == 'Finance':
+            manager = next((emp for emp in c_level_employees if emp['position'] == 'CFO'), random.choice(c_level_employees))
+        elif dept_name in ['Sales', 'Marketing']:
+            manager = next((emp for emp in c_level_employees if emp['position'] == 'CMO'), random.choice(c_level_employees))
+        else:
+            manager = next((emp for emp in c_level_employees if emp['position'] == 'COO'), random.choice(c_level_employees))
+        
+        employee = {
+            'name': name,
+            'position': position,
+            'department': dept_name,
+            'country': country,
+            'ldap': generate_ldap(name),
+            'moma_url': f"https://example.com/{generate_ldap(name)}",
+            'manager_name': manager['name'],
+            'manager_email': f"{manager['ldap']}@company.com",
+            'moma_photo_url': f"https://example.com/photos/{generate_ldap(name)}.jpg",
+            'manager_name_input': manager['name'],
+            'location_input': location,
+            'time_of_run': '2024-01-01',
+            'relationship_with_qt': random.choices(relationship_types, weights=relationship_weights)[0],
+            'representative_from_qt': random.choice(qt_representatives)
+        }
+        employees.append(employee)
+        vp_director_employees.append(employee)
+    
+    # 4. Create remaining employees (managers and individual contributors)
+    remaining_count = 150 - len(employees)
+    
+    for i in range(remaining_count):
+        # Choose department
+        dept_name = random.choice(list(departments.keys()))
+        dept_info = departments[dept_name]
+        
+        # Choose position (non-VP/Director)
+        available_positions = [pos for pos in dept_info['positions'] 
+                             if 'VP' not in pos and 'Director' not in pos]
+        if not available_positions:
+            available_positions = dept_info['positions']
+        
+        position = random.choice(available_positions)
+        name = generate_unique_name(existing_names)
+        location = random.choice(dept_info['locations'])
+        country = location_country[location]
+        
+        # Choose manager from appropriate level
+        potential_managers = []
+        
+        if dept_name == 'Executive':
+            potential_managers = [emp for emp in employees 
+                                if emp['department'] == dept_name and 
+                                ('VP' in emp['position'] or 'Director' in emp['position'] or emp['position'] in ['CEO', 'COO', 'CFO', 'CTO', 'CHRO', 'CMO'])]
+        else:
+            # Find managers in same department
+            dept_managers = [emp for emp in employees 
+                           if emp['department'] == dept_name and 
+                           ('VP' in emp['position'] or 'Director' in emp['position'] or 'Manager' in emp['position'])]
+            if dept_managers:
+                potential_managers = dept_managers
+            else:
+                # Fallback to any manager in department
+                potential_managers = [emp for emp in employees if emp['department'] == dept_name]
+        
+        if not potential_managers:
+            # Fallback to CEO
+            potential_managers = [employees[0]]
+        
+        manager = random.choice(potential_managers)
+        
+        employee = {
+            'name': name,
+            'position': position,
+            'department': dept_name,
+            'country': country,
+            'ldap': generate_ldap(name),
+            'moma_url': f"https://example.com/{generate_ldap(name)}",
+            'manager_name': manager['name'],
+            'manager_email': f"{manager['ldap']}@company.com",
+            'moma_photo_url': f"https://example.com/photos/{generate_ldap(name)}.jpg",
+            'manager_name_input': manager['name'],
+            'location_input': location,
+            'time_of_run': '2024-01-01',
+            'relationship_with_qt': random.choices(relationship_types, weights=relationship_weights)[0],
+            'representative_from_qt': random.choice(qt_representatives)
+        }
+        employees.append(employee)
+    
+    # Ensure we have exactly 150 employees
+    employees = employees[:150]
+    
+    # Final validation and cleanup
+    for employee in employees:
+        # Ensure all required fields are present
+        if not employee.get('manager_name') and employee['position'] != 'CEO':
+            employee['manager_name'] = employees[0]['name']  # Report to CEO as fallback
+            employee['manager_name_input'] = employees[0]['name']
+            employee['manager_email'] = f"{employees[0]['ldap']}@company.com"
+    
+    print(f"Generated {len(employees)} employees with realistic organizational structure")
+    print(f"Departments: {len(set(emp['department'] for emp in employees))}")
+    print(f"Countries: {len(set(emp['country'] for emp in employees))}")
+    print(f"Locations: {len(set(emp['location_input'] for emp in employees))}")
+    
+    # Print department breakdown
+    dept_breakdown = {}
+    for emp in employees:
+        dept = emp['department']
+        dept_breakdown[dept] = dept_breakdown.get(dept, 0) + 1
+    
+    print("\nDepartment breakdown:")
+    for dept, count in sorted(dept_breakdown.items()):
+        print(f"  {dept}: {count} employees")
+    
+    return employees
 
 def build_hierarchy_tree(data, root_person=None):
     """Build a hierarchical tree structure from flat data"""

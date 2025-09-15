@@ -219,17 +219,6 @@
             color: var(--text-secondary);
         }
         
-        .change-actions {
-            display: flex;
-            gap: 8px;
-        }
-        
-        .btn-small {
-            padding: 6px 12px;
-            font-size: 0.875rem;
-            border-radius: 8px;
-        }
-        
         .success-message, .error-message {
             padding: 16px;
             border-radius: 12px;
@@ -296,10 +285,6 @@
             .action-tabs {
                 flex-wrap: wrap;
             }
-            
-            .change-actions {
-                flex-direction: column;
-            }
         }
     </style>
 </head>
@@ -319,7 +304,6 @@
             <div class="management-container">
                 <div class="action-tabs">
                     <button class="tab-button active" onclick="switchTab('change-manager')">Change Manager</button>
-                    <button class="tab-button" onclick="switchTab('add-employee')">Add Employee</button>
                     <button class="tab-button" onclick="switchTab('update-details')">Update Details</button>
                     <button class="tab-button" onclick="switchTab('upload-data')">Upload Data</button>
                 </div>
@@ -355,67 +339,6 @@
                             </div>
                             
                             <button type="submit" class="btn-primary">Update Manager</button>
-                        </form>
-                    </div>
-                </div>
-
-                <!-- Add Employee Tab -->
-                <div id="add-employee" class="tab-content">
-                    <div class="form-container">
-                        <h3>Add New Employee</h3>
-                        <form id="add-employee-form">
-                            <div class="form-row">
-                                <div class="form-group">
-                                    <label class="form-label">Employee Name *</label>
-                                    <input type="text" id="new-employee-name" class="form-input" 
-                                           placeholder="Full name" required>
-                                </div>
-                                
-                                <div class="form-group">
-                                    <label class="form-label">Position *</label>
-                                    <input type="text" id="new-employee-position" class="form-input" 
-                                           placeholder="Job title" required>
-                                </div>
-                            </div>
-                            
-                            <div class="form-row">
-                                <div class="form-group">
-                                    <label class="form-label">Department</label>
-                                    <select id="new-employee-department" class="form-select">
-                                        <option value="">Select department...</option>
-                                        <!-- Options populated dynamically -->
-                                    </select>
-                                </div>
-                                
-                                <div class="form-group">
-                                    <label class="form-label">Country</label>
-                                    <select id="new-employee-country" class="form-select">
-                                        <option value="">Select country...</option>
-                                        <option value="USA">USA</option>
-                                        <option value="UK">UK</option>
-                                        <option value="Germany">Germany</option>
-                                        <option value="Portugal">Portugal</option>
-                                        <option value="India">India</option>
-                                    </select>
-                                </div>
-                            </div>
-                            
-                            <div class="form-row">
-                                <div class="form-group">
-                                    <label class="form-label">Location</label>
-                                    <input type="text" id="new-employee-location" class="form-input" 
-                                           placeholder="City">
-                                </div>
-                                
-                                <div class="form-group employee-search">
-                                    <label class="form-label">Manager</label>
-                                    <input type="text" id="new-employee-manager" class="form-input" 
-                                           placeholder="Search for manager..." autocomplete="off">
-                                    <div id="new-manager-results" class="search-results"></div>
-                                </div>
-                            </div>
-                            
-                            <button type="submit" class="btn-primary">Add Employee</button>
                         </form>
                     </div>
                 </div>
@@ -479,6 +402,17 @@
                         <h3>Upload Organization Data</h3>
                         <p>Upload an Excel file with organizational structure data. The file should contain columns: Name, Position, Department, Country, Location, Manager Name, etc.</p>
                         
+                        <!-- Template Download Section -->
+                        <div style="background: var(--ultra-light-blue); padding: 20px; border-radius: 12px; margin-bottom: 24px;">
+                            <h4 style="margin: 0 0 10px 0; color: var(--primary-blue);">📋 Need a Template?</h4>
+                            <p style="margin: 0 0 15px 0; color: var(--text-secondary);">
+                                Download our Excel template with sample data and detailed instructions to get started quickly.
+                            </p>
+                            <button type="button" class="btn-secondary" onclick="downloadTemplate()">
+                                📥 Download Excel Template
+                            </button>
+                        </div>
+                        
                         <div class="file-upload-section" id="file-drop-zone">
                             <div class="upload-icon">📁</div>
                             <h4>Drag and drop your Excel file here</h4>
@@ -492,6 +426,15 @@
                             <p id="file-details"></p>
                             <button type="button" class="btn-primary" onclick="processFile()">Process File</button>
                             <button type="button" class="btn-secondary" onclick="clearFile()">Clear</button>
+                        </div>
+                        
+                        <!-- Current Data Download Section -->
+                        <div style="border-top: 1px solid var(--medium-gray); padding-top: 24px; margin-top: 24px;">
+                            <h4>Export Current Data</h4>
+                            <p>Download the current organizational structure as an Excel file for backup or sharing.</p>
+                            <button type="button" class="btn-primary" onclick="downloadCurrentData()">
+                                📤 Download Current Structure
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -545,10 +488,7 @@
         // Populate department options
         function populateDepartmentOptions() {
             const departments = [...new Set(allEmployees.map(emp => emp.department))].sort();
-            const departmentSelects = [
-                'new-employee-department',
-                'update-department'
-            ];
+            const departmentSelects = ['update-department'];
 
             departmentSelects.forEach(selectId => {
                 const select = document.getElementById(selectId);
@@ -569,7 +509,6 @@
             const searchInputs = [
                 { input: 'employee-search', results: 'employee-results', callback: selectEmployee },
                 { input: 'manager-search', results: 'manager-results', callback: selectManager },
-                { input: 'new-employee-manager', results: 'new-manager-results', callback: selectNewManager },
                 { input: 'update-employee-search', results: 'update-employee-results', callback: selectEmployeeForUpdate }
             ];
 
@@ -637,12 +576,6 @@
         function selectManager(manager, container) {
             selectedManager = manager;
             document.getElementById('manager-search').value = manager.name;
-            container.style.display = 'none';
-        }
-
-        function selectNewManager(manager, container) {
-            document.getElementById('new-employee-manager').value = manager.name;
-            document.getElementById('new-employee-manager').dataset.managerId = manager.name;
             container.style.display = 'none';
         }
 
@@ -720,40 +653,6 @@
                 }
             } catch (error) {
                 showError('Error updating manager assignment');
-            }
-        });
-
-        document.getElementById('add-employee-form').addEventListener('submit', async function(e) {
-            e.preventDefault();
-            
-            const formData = new FormData(this);
-            const data = {
-                name: document.getElementById('new-employee-name').value,
-                position: document.getElementById('new-employee-position').value,
-                department: document.getElementById('new-employee-department').value,
-                country: document.getElementById('new-employee-country').value,
-                location: document.getElementById('new-employee-location').value,
-                managerName: document.getElementById('new-employee-manager').dataset.managerId || '',
-                action: 'add_employee'
-            };
-
-            try {
-                const response = await fetch('/api/update-structure', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(data)
-                });
-
-                const result = await response.json();
-                if (result.success) {
-                    showSuccess('Employee added successfully');
-                    this.reset();
-                    loadEmployees(); // Refresh employee list
-                } else {
-                    showError(result.message || 'Failed to add employee');
-                }
-            } catch (error) {
-                showError('Error adding employee');
             }
         });
 
