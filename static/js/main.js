@@ -569,20 +569,15 @@ function buildHierarchyChain(data) {
         children: [],
         _children: data.children || [],
         isRoot: true,
-        level: 0
+        level: 0,
+        expanded: false // Track expansion state
     };
     
-    // Add all immediate children
+    // Add all immediate children but keep them collapsed initially
     if (data.children && Array.isArray(data.children) && data.children.length > 0) {
-        root.children = data.children.map((child, index) => ({
-            data: child,
-            parent: root,
-            children: [],
-            _children: child.children || [],
-            isChild: true,
-            level: 1,
-            index: index
-        }));
+        // Don't show children initially - they should be expanded manually
+        root._children = data.children;
+        root.children = []; // Start collapsed
     }
     
     return root;
@@ -597,19 +592,9 @@ function logHierarchyStructure(root) {
     }
     
     console.log('Root:', root.data.name, '- Level:', root.level);
-    if (root.children && root.children.length > 0) {
-        console.log('Direct reports (' + root.children.length + '):');
-        root.children.forEach((child, i) => {
-            if (child.data) {
-                console.log(`  ${i+1}. ${child.data.name} (${child.data.position || 'No position'})`);
-                if (child._children && child._children.length > 0) {
-                    console.log(`     Has ${child._children.length} subordinates`);
-                }
-            }
-        });
-    } else {
-        console.log('No direct reports');
-    }
+    console.log('Available children (_children):', root._children ? root._children.length : 0);
+    console.log('Visible children (children):', root.children ? root.children.length : 0);
+    console.log('Expanded state:', root.expanded);
     console.log('===========================');
 }
 
@@ -622,43 +607,58 @@ function updateCompleteChart() {
     
     console.log('Updating complete hierarchy chart...');
     
-    // Create flat list of all visible nodes
-    const nodes = [globalRoot];
-    if (globalRoot.children && globalRoot.children.length > 0) {
-        nodes.push(...globalRoot.children);
+    // Create flat list of all visible nodes (recursively)
+    const nodes = [];
+    const links = [];
+    
+    function collectNodes(node, parentNode = null) {
+        if (!node) return;
+        
+        nodes.push(node);
+        
+        // Add link from parent to this node
+        if (parentNode) {
+            links.push({
+                source: parentNode,
+                target: node
+            });
+        }
+        
+        // Recursively add visible children
+        if (node.children && Array.isArray(node.children)) {
+            node.children.forEach(child => collectNodes(child, node));
+        }
     }
     
-    // Create links from root to each child
-    const links = globalRoot.children || [];
+    collectNodes(globalRoot);
     
     console.log('Chart update - showing', nodes.length, 'nodes and', links.length, 'links');
     
-    // Position nodes vertically
-    positionCompleteHierarchy(nodes);
+    // Position nodes hierarchically
+    positionHierarchicalNodes(nodes);
+    
+    // Calculate required height and adjust SVG
+    adjustChartHeight(nodes);
     
     // Update connecting lines
     const link = globalG.selectAll('.link')
-        .data(links, d => d.data ? d.data.name : 'unknown');
+        .data(links, d => `${d.source.data.name}-${d.target.data.name}`);
     
     const linkEnter = link.enter().insert('line', "g")
         .attr("class", "link")
         .style('stroke', '#C1C7CD')
         .style('stroke-width', '2px')
-        .style('opacity', 0)
-        .attr('x1', 0)
-        .attr('y1', 0)
-        .attr('x2', 0)
-        .attr('y2', 0);
+        .style('opacity', 0);
     
     const linkUpdate = linkEnter.merge(link);
     
     linkUpdate.transition()
         .duration(500)
         .style('opacity', 1)
-        .attr('x1', globalRoot.x || 0)
-        .attr('y1', (globalRoot.y || 0) + 42.5)
-        .attr('x2', d => d.x || 0)
-        .attr('y2', d => (d.y || 0) - 42.5);
+        .attr('x1', d => d.source.x || 0)
+        .attr('y1', d => (d.source.y || 0) + 42.5)
+        .attr('x2', d => d.target.x || 0)
+        .attr('y2', d => (d.target.y || 0) - 42.5);
     
     link.exit().transition()
         .duration(500)
@@ -672,9 +672,6 @@ function updateCompleteChart() {
     const nodeEnter = node.enter().append('g')
         .attr('class', 'node complete-node')
         .attr("transform", d => `translate(${d.x || 0},${d.y || 0})`)
-        .on('click', function(event, d) { 
-            handleCompleteNodeClick(d); 
-        })
         .style('cursor', 'pointer');
     
     // Add professional card background
@@ -797,12 +794,16 @@ function updateCompleteChart() {
         .style('stroke', '#ffffff')
         .style('stroke-width', '2px');
     
-    // Add expand button for nodes with children
-    const expandButton = nodeEnter.append('g')
+    // Add expand/collapse button - ONLY for nodes that have unexpanded children
+    const expandButton = nodeEnter.filter(d => {
+        // Only show button if node has _children that aren't currently expanded
+        return d._children && d._children.length > 0;
+    }).append('g')
         .attr('class', 'expand-button')
-        .style('display', d => {
-            const reportCount = d._children ? d._children.length : 0;
-            return reportCount > 0 ? 'block' : 'none';
+        .on('click', function(event, d) {
+            event.stopPropagation();
+            console.log('Expand button clicked for:', d.data.name, 'Expanded:', d.expanded);
+            toggleNodeExpansion(d);
         });
     
     expandButton.append('circle')
@@ -821,7 +822,7 @@ function updateCompleteChart() {
         .style('font-size', '12px')
         .style('font-weight', '700')
         .style('fill', '#0E3386')
-        .text('+');
+        .text(d => d.expanded ? '−' : '+');
     
     // Update existing nodes
     const nodeUpdate = nodeEnter.merge(node);
@@ -829,6 +830,568 @@ function updateCompleteChart() {
     nodeUpdate.transition()
         .duration(500)
         .attr("transform", d => `translate(${d.x},${d.y})`);
+    
+    // Update expand/collapse button text for existing nodes
+    nodeUpdate.select('.expand-button text')
+        .text(d => d.expanded ? '−' : '+');
+    
+    // Remove exiting nodes
+    node.exit().transition()
+        .duration(500)
+        .style('opacity', 0)
+        .remove();
+    
+    console.log('Complete chart update finished successfully');
+    
+    // Auto-scroll to show newly expanded content
+    setTimeout(() => {
+        scrollToShowAllContent(nodes);
+    }, 600); // Wait for transition to complete
+}
+
+// Adjust chart height based on content
+function adjustChartHeight(nodes) {
+    if (!globalSvg || nodes.length === 0) return;
+    
+    // Find the bottom-most node
+    const maxY = Math.max(...nodes.map(node => node.y || 0));
+    const padding = 150; // Extra space at bottom
+    const minHeight = 800; // Minimum height
+    
+    const requiredHeight = Math.max(minHeight, maxY + padding);
+    
+    console.log('Adjusting chart height to:', requiredHeight, 'Max Y:', maxY);
+    
+    // Update SVG height
+    globalSvg.attr("height", requiredHeight);
+    
+    // Update chart container height
+    const chartContainer = document.getElementById('org-chart');
+    if (chartContainer) {
+        chartContainer.style.height = requiredHeight + 'px';
+    }
+}
+
+// Auto-scroll to ensure all content is visible
+function scrollToShowAllContent(nodes) {
+    if (nodes.length === 0) return;
+    
+    // Find the last (bottom-most) node
+    const bottomNode = nodes.reduce((bottom, node) => {
+        return (node.y || 0) > (bottom.y || 0) ? node : bottom;
+    });
+    
+    if (!bottomNode) return;
+    
+    console.log('Bottom node:', bottomNode.data.name, 'at Y:', bottomNode.y);
+    
+    // Try multiple scroll targets - chart container, parent containers, and window
+    const scrollTargets = [
+        document.getElementById('org-chart'),
+        document.querySelector('.visualization-panel'),
+        document.querySelector('.results-section'),
+        document.querySelector('.container'),
+        document.documentElement,
+        document.body
+    ];
+    
+    const nodeBottomY = (bottomNode.y || 0) + 100; // Add padding
+    
+    // Find the best scroll target
+    for (const target of scrollTargets) {
+        if (!target) continue;
+        
+        const isScrollable = target.scrollHeight > target.clientHeight;
+        
+        if (isScrollable) {
+            console.log('Found scrollable target:', target.id || target.className);
+            
+            // Calculate scroll position
+            const targetScrollTop = Math.max(0, nodeBottomY - target.clientHeight + 200);
+            
+            console.log('Scrolling to:', targetScrollTop);
+            
+            // Smooth scroll
+            target.scrollTo({
+                top: targetScrollTop,
+                behavior: 'smooth'
+            });
+            
+            break; // Use the first scrollable container we find
+        }
+    }
+    
+    // Fallback: scroll the window
+    const windowScrollY = window.pageYOffset || document.documentElement.scrollTop;
+    const windowHeight = window.innerHeight;
+    const chartContainer = document.getElementById('org-chart');
+    
+    if (chartContainer) {
+        const chartRect = chartContainer.getBoundingClientRect();
+        const chartTop = chartRect.top + windowScrollY;
+        const targetY = chartTop + nodeBottomY;
+        
+        if (targetY > windowScrollY + windowHeight) {
+            console.log('Scrolling window to show content at:', targetY);
+            window.scrollTo({
+                top: targetY - windowHeight + 200,
+                behavior: 'smooth'
+            });
+        }
+    }
+}
+
+// Alternative: Scroll to expanded node specifically
+function scrollToExpandedNode(expandedNode) {
+    if (!expandedNode || !expandedNode.children || expandedNode.children.length === 0) {
+        return;
+    }
+    
+    // Find the last child of the expanded node
+    const lastChild = expandedNode.children[expandedNode.children.length - 1];
+    if (!lastChild) return;
+    
+    console.log('Scrolling to show expanded children of:', expandedNode.data.name);
+    console.log('Last child:', lastChild.data.name, 'at Y:', lastChild.y);
+    
+    const targetY = (lastChild.y || 0) + 100;
+    
+    // Get chart container
+    const chartContainer = document.getElementById('org-chart');
+    if (!chartContainer) return;
+    
+    // Make sure the chart container is scrollable
+    chartContainer.style.overflowY = 'auto';
+    chartContainer.style.maxHeight = '800px';
+    
+    // Calculate and perform scroll
+    const containerHeight = chartContainer.clientHeight;
+    const currentScroll = chartContainer.scrollTop;
+    const visibleBottom = currentScroll + containerHeight;
+    
+    if (targetY > visibleBottom) {
+        const newScrollTop = targetY - containerHeight + 150;
+        
+        console.log('Chart container scroll - Current:', currentScroll, 'Target:', newScrollTop);
+        
+        chartContainer.scrollTo({
+            top: Math.max(0, newScrollTop),
+            behavior: 'smooth'
+        });
+    }
+}
+
+// Position nodes vertically in hierarchy with dynamic spacing
+function positionHierarchicalNodes(nodes) {
+    if (!globalSvg) {
+        console.error('GlobalSvg not available for positioning');
+        return;
+    }
+    
+    const containerWidth = globalSvg.node().getBoundingClientRect().width - 80;
+    const centerX = containerWidth / 2;
+    const baseVerticalSpacing = 140; // Base space between parent and child
+    const siblingSpacing = 120; // Space between siblings
+    
+    // Start positioning from the top
+    let currentY = 80; // Starting Y position
+    
+    // Position nodes level by level, accounting for expansions
+    function positionNodeAndChildren(node, level = 0) {
+        if (!node) return currentY;
+        
+        // Position the current node
+        node.x = centerX;
+        node.y = currentY;
+        node.level = level;
+        
+        console.log(`Positioning ${node.data ? node.data.name : 'unknown'} at Y: ${currentY} (Level: ${level})`);
+        
+        // Move Y position down for next node
+        currentY += siblingSpacing;
+        
+        // If this node is expanded, position its children
+        if (node.expanded && node.children && node.children.length > 0) {
+            console.log(`Node ${node.data ? node.data.name : 'unknown'} is expanded with ${node.children.length} children`);
+            
+            // Add extra space before children
+            currentY += 20;
+            
+            // Position each child
+            node.children.forEach((child, index) => {
+                child.level = level + 1;
+                positionNodeAndChildren(child, level + 1);
+            });
+            
+            // Add extra space after children group
+            currentY += 20;
+        }
+        
+        return currentY;
+    }
+    
+    // Start positioning from root
+    if (globalRoot) {
+        positionNodeAndChildren(globalRoot, 0);
+    }
+    
+    console.log('Positioned nodes with dynamic spacing. Final Y:', currentY);
+    
+    // Update chart height based on final position
+    const requiredHeight = Math.max(800, currentY + 100);
+    if (globalSvg) {
+        globalSvg.attr("height", requiredHeight);
+    }
+    
+    const chartContainer = document.getElementById('org-chart');
+    if (chartContainer) {
+        chartContainer.style.height = requiredHeight + 'px';
+    }
+}
+
+// Enhanced expand node with repositioning
+function expandNode(node) {
+    console.log('Expanding node:', node.data ? node.data.name : 'unknown');
+    
+    if (!node._children || node._children.length === 0) {
+        console.log('No _children to expand');
+        return;
+    }
+    
+    // Create child nodes from _children data
+    node.children = node._children.map((childData, index) => ({
+        data: childData,
+        parent: node,
+        children: [],
+        _children: childData.children || [],
+        isChild: true,
+        level: node.level + 1,
+        index: index,
+        expanded: false
+    }));
+    
+    node.expanded = true;
+    console.log('Expanded node now has', node.children.length, 'visible children');
+    
+    // Force immediate repositioning after expansion
+    setTimeout(() => {
+        repositionAllNodes();
+    }, 50);
+}
+
+// Enhanced collapse node with repositioning
+function collapseNode(node) {
+    console.log('Collapsing node:', node.data ? node.data.name : 'unknown');
+    
+    if (!node.children || node.children.length === 0) {
+        console.log('No children to collapse');
+        return;
+    }
+    
+    // Recursively collapse all child nodes first
+    node.children.forEach(child => {
+        if (child.expanded) {
+            collapseNode(child);
+        }
+    });
+    
+    // Hide all children
+    node.children = [];
+    node.expanded = false;
+    console.log('Collapsed node, children now hidden');
+    
+    // Force immediate repositioning after collapse
+    setTimeout(() => {
+        repositionAllNodes();
+    }, 50);
+}
+
+// New function to reposition all visible nodes
+function repositionAllNodes() {
+    if (!globalRoot || !globalG) {
+        console.error('Cannot reposition - missing global references');
+        return;
+    }
+    
+    console.log('Repositioning all nodes after expansion/collapse');
+    
+    // Collect all currently visible nodes
+    const nodes = [];
+    function collectNodes(node) {
+        if (!node) return;
+        nodes.push(node);
+        if (node.children && Array.isArray(node.children)) {
+            node.children.forEach(collectNodes);
+        }
+    }
+    collectNodes(globalRoot);
+    
+    // Reposition all nodes
+    positionHierarchicalNodes(nodes);
+    
+    // Update existing node positions with animation
+    globalG.selectAll('.node')
+        .data(nodes, d => d.data ? d.data.name : 'unknown')
+        .transition()
+        .duration(400)
+        .attr("transform", d => `translate(${d.x},${d.y})`);
+    
+    // Update link positions
+    const links = [];
+    function collectLinks(node) {
+        if (!node || !node.children) return;
+        node.children.forEach(child => {
+            links.push({ source: node, target: child });
+            collectLinks(child);
+        });
+    }
+    collectLinks(globalRoot);
+    
+    globalG.selectAll('.link')
+        .data(links, d => `${d.source.data.name}-${d.target.data.name}`)
+        .transition()
+        .duration(400)
+        .attr('x1', d => d.source.x || 0)
+        .attr('y1', d => (d.source.y || 0) + 42.5)
+        .attr('x2', d => d.target.x || 0)
+        .attr('y2', d => (d.target.y || 0) - 42.5);
+    
+    console.log('Node repositioning complete');
+}
+
+// Update the main chart update to use new positioning
+function updateCompleteChart() {
+    if (!globalRoot || !globalG) {
+        console.error('Global references missing for chart update');
+        return;
+    }
+    
+    console.log('Updating complete hierarchy chart...');
+    
+    // Create flat list of all visible nodes (recursively)
+    const nodes = [];
+    const links = [];
+    
+    function collectNodes(node, parentNode = null) {
+        if (!node) return;
+        
+        nodes.push(node);
+        
+        // Add link from parent to this node
+        if (parentNode) {
+            links.push({
+                source: parentNode,
+                target: node
+            });
+        }
+        
+        // Recursively add visible children
+        if (node.children && Array.isArray(node.children)) {
+            node.children.forEach(child => collectNodes(child, node));
+        }
+    }
+    
+    collectNodes(globalRoot);
+    
+    console.log('Chart update - showing', nodes.length, 'nodes and', links.length, 'links');
+    
+    // Position nodes with dynamic spacing
+    positionHierarchicalNodes(nodes);
+    
+    // Update connecting lines
+    const link = globalG.selectAll('.link')
+        .data(links, d => `${d.source.data.name}-${d.target.data.name}`);
+    
+    const linkEnter = link.enter().insert('line', "g")
+        .attr("class", "link")
+        .style('stroke', '#C1C7CD')
+        .style('stroke-width', '2px')
+        .style('opacity', 0);
+    
+    const linkUpdate = linkEnter.merge(link);
+    
+    linkUpdate.transition()
+        .duration(500)
+        .style('opacity', 1)
+        .attr('x1', d => d.source.x || 0)
+        .attr('y1', d => (d.source.y || 0) + 42.5)
+        .attr('x2', d => d.target.x || 0)
+        .attr('y2', d => (d.target.y || 0) - 42.5);
+    
+    link.exit().transition()
+        .duration(500)
+        .style('opacity', 0)
+        .remove();
+    
+    // Update nodes
+    const node = globalG.selectAll('.node')
+        .data(nodes, d => d.data ? d.data.name : 'unknown-' + Math.random());
+    
+    const nodeEnter = node.enter().append('g')
+        .attr('class', 'node complete-node')
+        .attr("transform", d => `translate(${d.x || 0},${d.y || 0})`)
+        .style('cursor', 'pointer');
+    
+    // Add professional card background
+    nodeEnter.append('rect')
+        .attr('class', 'professional-card')
+        .attr('width', 280)
+        .attr('height', 85)
+        .attr('x', -140)
+        .attr('y', -42.5)
+        .attr('rx', 12)
+        .attr('ry', 12)
+        .style('fill', '#ffffff')
+        .style('stroke', d => d.isRoot ? '#0E3386' : '#E5E7EB')
+        .style('stroke-width', d => d.isRoot ? '2px' : '1px')
+        .style('filter', 'drop-shadow(0 4px 6px rgba(0, 0, 0, 0.1))')
+        .style('transition', 'all 0.3s ease');
+    
+    // Add hover effects
+    nodeEnter.selectAll('.professional-card')
+        .on('mouseenter', function() {
+            d3.select(this)
+                .style('filter', 'drop-shadow(0 8px 25px rgba(0, 0, 0, 0.15))')
+                .style('transform', 'translateY(-2px)');
+        })
+        .on('mouseleave', function() {
+            d3.select(this)
+                .style('filter', 'drop-shadow(0 4px 6px rgba(0, 0, 0, 0.1))')
+                .style('transform', 'translateY(0)');
+        });
+    
+    // Add profile circle
+    nodeEnter.append('circle')
+        .attr('class', 'profile-circle')
+        .attr('cx', -90)
+        .attr('cy', 0)
+        .attr('r', 25)
+        .style('fill', d => {
+            const colors = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#06B6D4', '#F97316', '#84CC16'];
+            const name = d.data ? d.data.name || '' : '';
+            const index = name.length % colors.length;
+            return colors[index];
+        })
+        .style('stroke', '#ffffff')
+        .style('stroke-width', '3px');
+    
+    // Add profile initials
+    nodeEnter.append('text')
+        .attr('class', 'profile-initials')
+        .attr('x', -90)
+        .attr('y', 5)
+        .attr('text-anchor', 'middle')
+        .style('font-family', 'Inter, sans-serif')
+        .style('font-size', '14px')
+        .style('font-weight', '600')
+        .style('fill', '#ffffff')
+        .text(d => {
+            const name = d.data ? d.data.name || '' : '';
+            return name.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2);
+        });
+    
+    // Add employee name
+    nodeEnter.append('text')
+        .attr('class', 'employee-name')
+        .attr('x', -45)
+        .attr('y', -12)
+        .attr('text-anchor', 'start')
+        .style('font-family', 'Inter, sans-serif')
+        .style('font-size', '16px')
+        .style('font-weight', '700')
+        .style('fill', '#1F2937')
+        .text(d => {
+            const name = d.data ? d.data.name || '' : '';
+            return name.length > 20 ? name.substring(0, 18) + '...' : name;
+        });
+    
+    // Add position
+    nodeEnter.append('text')
+        .attr('class', 'employee-position')
+        .attr('x', -45)
+        .attr('y', 4)
+        .attr('text-anchor', 'start')
+        .style('font-family', 'Inter, sans-serif')
+        .style('font-size', '13px')
+        .style('font-weight', '500')
+        .style('fill', '#6B7280')
+        .text(d => {
+            const position = d.data ? d.data.position || '' : '';
+            return position.length > 24 ? position.substring(0, 22) + '...' : position;
+        });
+    
+    // Add location
+    nodeEnter.append('text')
+        .attr('class', 'employee-location')
+        .attr('x', -45)
+        .attr('y', 20)
+        .attr('text-anchor', 'start')
+        .style('font-family', 'Inter, sans-serif')
+        .style('font-size', '11px')
+        .style('font-weight', '400')
+        .style('fill', '#9CA3AF')
+        .text(d => {
+            const location = d.data ? (d.data.location || d.data.country || '') : '';
+            return location.length > 30 ? location.substring(0, 28) + '...' : location;
+        });
+    
+    // Add connection status
+    nodeEnter.append('circle')
+        .attr('class', 'status-indicator')
+        .attr('cx', 115)
+        .attr('cy', -25)
+        .attr('r', 6)
+        .style('fill', d => {
+            const relationship = d.data ? d.data.relationship_with_qt || 'None' : 'None';
+            switch(relationship.toLowerCase()) {
+                case 'direct': return '#10B981';
+                case 'indirect': return '#F59E0B';
+                default: return '#D1D5DB';
+            }
+        })
+        .style('stroke', '#ffffff')
+        .style('stroke-width', '2px');
+    
+    // Add expand/collapse button - ONLY for nodes that have unexpanded children
+    const expandButton = nodeEnter.filter(d => {
+        // Only show button if node has _children that aren't currently expanded
+        return d._children && d._children.length > 0;
+    }).append('g')
+        .attr('class', 'expand-button')
+        .on('click', function(event, d) {
+            event.stopPropagation();
+            console.log('Expand button clicked for:', d.data.name, 'Expanded:', d.expanded);
+            toggleNodeExpansion(d);
+        });
+    
+    expandButton.append('circle')
+        .attr('cx', 0)
+        .attr('cy', 60)
+        .attr('r', 10)
+        .style('fill', '#ffffff')
+        .style('stroke', '#0E3386')
+        .style('stroke-width', '2px');
+    
+    expandButton.append('text')
+        .attr('x', 0)
+        .attr('y', 65)
+        .attr('text-anchor', 'middle')
+        .style('font-family', 'Inter, sans-serif')
+        .style('font-size', '12px')
+        .style('font-weight', '700')
+        .style('fill', '#0E3386')
+        .text(d => d.expanded ? '−' : '+');
+    
+    // Update existing nodes with smooth transitions
+    const nodeUpdate = nodeEnter.merge(node);
+    
+    nodeUpdate.transition()
+        .duration(500)
+        .attr("transform", d => `translate(${d.x},${d.y})`);
+    
+    // Update expand/collapse button text for existing nodes
+    nodeUpdate.select('.expand-button text')
+        .text(d => d.expanded ? '−' : '+');
     
     // Remove exiting nodes
     node.exit().transition()
@@ -839,55 +1402,179 @@ function updateCompleteChart() {
     console.log('Complete chart update finished successfully');
 }
 
-// Position nodes in complete hierarchy
-function positionCompleteHierarchy(nodes) {
-    if (!globalSvg) {
-        console.error('GlobalSvg not available for positioning');
+// Toggle node expansion/collapse
+function toggleNodeExpansion(clickedNode) {
+    console.log('Toggling expansion for:', clickedNode.data ? clickedNode.data.name : 'unknown');
+    console.log('Current state - Expanded:', clickedNode.expanded, 'Has _children:', clickedNode._children ? clickedNode._children.length : 0);
+    
+    if (!clickedNode._children || clickedNode._children.length === 0) {
+        console.log('No children to expand/collapse');
         return;
     }
     
-    const containerWidth = globalSvg.node().getBoundingClientRect().width - 80;
-    const centerX = containerWidth / 2;
-    const cardSpacing = 120;
-    
-    // Root at top
-    if (nodes[0]) {
-        nodes[0].x = centerX;
-        nodes[0].y = 80;
+    if (clickedNode.expanded) {
+        // Collapse - hide all expanded children
+        collapseNode(clickedNode);
+    } else {
+        // Expand - show all children
+        expandNode(clickedNode);
     }
     
-    // Stack children vertically below
-    for (let i = 1; i < nodes.length; i++) {
-        nodes[i].x = centerX;
-        nodes[i].y = 200 + ((i - 1) * cardSpacing);
-    }
+    updateCompleteChart();
     
-    console.log('Positioned', nodes.length, 'nodes in complete hierarchy');
+    // After expanding, scroll to show the expanded content
+    if (!clickedNode.expanded) { // If we just expanded (now it's true)
+        setTimeout(() => {
+            scrollToExpandedNode(clickedNode);
+        }, 700); // Wait for animations
+    }
 }
 
-// Handle node clicks - expand within current hierarchy
-function handleCompleteNodeClick(clickedNode) {
-    console.log('Complete node clicked:', clickedNode.data ? clickedNode.data.name : 'unknown');
+// Render the main organizational chart
+function renderOrgChart(data) {
+    console.log('Rendering organizational chart with data:', data);
     
-    // If clicked node has no reports, do nothing
-    if (!clickedNode._children || clickedNode._children.length === 0) {
-        console.log('No reports to show for:', clickedNode.data ? clickedNode.data.name : 'unknown');
+    const container = d3.select("#org-chart");
+    if (container.empty()) {
+        console.error('Org chart container not found');
+        alert('Chart container not found on page');
         return;
     }
     
-    // For now, just log the click - can be expanded later for drill-down functionality
-    console.log('Node has', clickedNode._children.length, 'subordinates');
+    container.selectAll("*").remove();
+    
+    const containerNode = container.node();
+    if (!containerNode) {
+        console.error('Org chart container node not found');
+        return;
+    }
+    
+    // Setup container for scrolling
+    containerNode.style.overflowY = 'auto';
+    containerNode.style.overflowX = 'hidden';
+    containerNode.style.maxHeight = '800px';
+    containerNode.style.position = 'relative';
+    
+    const width = containerNode.getBoundingClientRect().width || 800;
+    const height = 1200; // Start with larger height
+    
+    console.log('Chart container dimensions:', width, 'x', height);
+    
+    // Analyze and display stats for the complete visible hierarchy
+    const connectionStats = analyzeBusinessOpportunities(data);
+    displayBusinessOpportunityInfo(connectionStats);
+    
+    const representativeStats = analyzeRepresentatives(data);
+    displayConnectionChampions(representativeStats);
+    
+    // Store global references
+    globalTreeData = data;
+    
+    const svg = container
+        .append("svg")
+        .attr("width", width)
+        .attr("height", height)
+        .style("background", "#ffffff")
+        .style("display", "block");
+    
+    globalSvg = svg;
+    
+    const g = svg.append("g")
+        .attr("transform", "translate(40,40)");
+    
+    globalG = g;
+    
+    // Create hierarchy maintaining the complete chain
+    globalRoot = buildHierarchyChain(data);
+    
+    if (!globalRoot) {
+        console.error('Failed to build hierarchy chain');
+        alert('Failed to build organizational chart structure');
+        return;
+    }
+    
+    console.log('Hierarchy chain built successfully');
+    logHierarchyStructure(globalRoot);
+    
+    updateCompleteChart();
+}
+
+// Expand node to show all its children
+function expandNode(node) {
+    console.log('Expanding node:', node.data ? node.data.name : 'unknown');
+    
+    if (!node._children || node._children.length === 0) {
+        console.log('No _children to expand');
+        return;
+    }
+    
+    // Create child nodes from _children data
+    node.children = node._children.map((childData, index) => ({
+        data: childData,
+        parent: node,
+        children: [],
+        _children: childData.children || [],
+        isChild: true,
+        level: node.level + 1,
+        index: index,
+        expanded: false
+    }));
+    
+    node.expanded = true;
+    console.log('Expanded node now has', node.children.length, 'visible children');
+}
+
+// Collapse node to hide all its children
+function collapseNode(node) {
+    console.log('Collapsing node:', node.data ? node.data.name : 'unknown');
+    
+    if (!node.children || node.children.length === 0) {
+        console.log('No children to collapse');
+        return;
+    }
+    
+    // Recursively collapse all child nodes first
+    node.children.forEach(child => {
+        if (child.expanded) {
+            collapseNode(child);
+        }
+    });
+    
+    // Hide all children
+    node.children = [];
+    node.expanded = false;
+    console.log('Collapsed node, children now hidden');
 }
 
 // Chart control functions
 function expandAll() {
     console.log('Expand all - showing all immediate reports');
-    // All immediate reports are already shown in the complete hierarchy
+    
+    if (!globalRoot) {
+        console.log('No chart data to expand');
+        return;
+    }
+    
+    // Expand the root node if it has children
+    if (globalRoot._children && globalRoot._children.length > 0 && !globalRoot.expanded) {
+        expandNode(globalRoot);
+        updateCompleteChart();
+    }
 }
 
 function collapseAll() {
-    console.log('Collapse all - showing immediate reports only');
-    // Always show immediate reports in complete hierarchy
+    console.log('Collapse all - hiding all expanded nodes');
+    
+    if (!globalRoot) {
+        console.log('No chart data to collapse');
+        return;
+    }
+    
+    // Collapse the root node if it's expanded
+    if (globalRoot.expanded) {
+        collapseNode(globalRoot);
+        updateCompleteChart();
+    }
 }
 
 function resetChart() {
@@ -900,7 +1587,7 @@ function resetChart() {
     renderOrgChart(globalTreeData);
 }
 
-// Enhanced highlighting functions with visual feedback
+// Enhanced highlighting functions with visual feedback (REMOVED BANNER)
 function highlightChampionConnections(champion) {
     clearHighlights();
     
@@ -934,62 +1621,8 @@ function highlightChampionConnections(champion) {
         });
     }
     
-    // Show notification
-    showHighlightNotification(champion);
-    
-    // Auto-clear highlights after 15 seconds
-    setTimeout(clearHighlights, 15000);
-}
-
-// Show notification when champion is highlighted
-function showHighlightNotification(champion) {
-    // Remove existing notification
-    const existingNotification = document.querySelector('.champion-notification');
-    if (existingNotification) {
-        existingNotification.remove();
-    }
-    
-    // Create notification
-    const notification = document.createElement('div');
-    notification.className = 'champion-notification';
-    notification.innerHTML = `
-        <div style="
-            position: fixed;
-            top: 20px;
-            right: 20px;
-            background: linear-gradient(135deg, #FFD700, #FFA500);
-            color: #000;
-            padding: 16px 20px;
-            border-radius: 12px;
-            box-shadow: 0 8px 25px rgba(255, 215, 0, 0.3);
-            z-index: 1000;
-            font-family: 'Inter', sans-serif;
-            font-weight: 600;
-            max-width: 300px;
-            animation: slideInFromRight 0.5s ease;
-        ">
-            <div style="display: flex; align-items: center; gap: 10px;">
-                <span style="font-size: 20px;">★</span>
-                <div>
-                    <div style="font-size: 14px; margin-bottom: 4px;">
-                        Champion: ${champion.name}
-                    </div>
-                    <div style="font-size: 12px; opacity: 0.8;">
-                        ${champion.totalConnections} connections highlighted
-                    </div>
-                </div>
-            </div>
-        </div>
-    `;
-    
-    document.body.appendChild(notification);
-    
-    // Auto-remove notification
-    setTimeout(() => {
-        if (notification.parentNode) {
-            notification.remove();
-        }
-    }, 5000);
+    // Auto-clear highlights after 10 seconds
+    setTimeout(clearHighlights, 10000);
 }
 
 function clearHighlights() {
@@ -1022,7 +1655,7 @@ function clearHighlights() {
         });
     }
     
-    // Remove any notifications
+    // Remove any existing notifications (though we're not creating them anymore)
     const notifications = document.querySelectorAll('.champion-notification');
     notifications.forEach(notification => notification.remove());
 }
@@ -1215,6 +1848,9 @@ window.debugOrgChart = function() {
     console.log('Current person:', currentPerson);
     console.log('Global tree data:', globalTreeData);
     console.log('Global root:', globalRoot);
+    console.log('Global root expanded:', globalRoot ? globalRoot.expanded : 'N/A');
+    console.log('Global root _children:', globalRoot ? (globalRoot._children ? globalRoot._children.length : 0) : 'N/A');
+    console.log('Global root children:', globalRoot ? (globalRoot.children ? globalRoot.children.length : 0) : 'N/A');
     console.log('All employees loaded:', allEmployees.length);
     console.log('==================');
 };
@@ -1224,4 +1860,4 @@ window.collapseAll = collapseAll;
 window.resetChart = resetChart;
 window.clearHighlights = clearHighlights;
 
-console.log('Updated JavaScript file loaded successfully - Enhanced error handling and debugging');
+console.log('Fixed JavaScript file loaded successfully - Proper expand/collapse with filtering');

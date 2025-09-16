@@ -275,7 +275,7 @@ def load_sample_data():
     }
     
     # QT representatives (connection champions)
-    qt_representatives = ['Mayank', 'Lihi', 'Dennis', 'Mike', 'Matt', 'Sarah K', 'Alex', 'Jordan']
+    qt_representatives = ['Lihi Segev', 'Abhijeet Bagade', 'Omri Nissim', 'Kobi Kol', 'Jillian OrRico', 'Michael Bush', 'Mayank Arya']
     
     # Relationship types with weights
     relationship_types = ['Direct', 'Indirect', 'None']
